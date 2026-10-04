@@ -283,7 +283,7 @@ tr:hover td{background:#FAFBFC}
     <button class="nav-item" onclick="openView('archive',this)" id="nav-archive">
       <span class="nav-icon">📦</span><span class="nav-label">أرشيف</span>
     </button>
-    <button class="nav-item" onclick="openView('settings',this)" id="nav-settings">
+    <button class="nav-item" onclick="openSettingsGuarded(this)" id="nav-settings">
       <span class="nav-icon">⚙️</span><span class="nav-label">إعدادات</span>
     </button>
   </div>
@@ -1816,6 +1816,7 @@ function showApp() {
 
 function doLogout() {
   state.isManager = false;
+  settingsUnlocked = false;
   document.getElementById('main-app').classList.add('hidden');
   document.getElementById('login-page').style.display='flex';
   document.getElementById('pw-input').value='';
@@ -2930,6 +2931,35 @@ function renderSettings() {
 }
 
 let settingsUnlocked = false;
+
+function openSettingsGuarded(navEl) {
+  if (state.isManager) { openView('settings', navEl); return; } // managers are read-only anyway, let them view
+  if (settingsUnlocked) { openView('settings', navEl); return; }
+  showModal(`
+    <div class="modal-title">🔑 كلمة سر الإعدادات</div>
+    <div class="form-group">
+      <input type="password" class="form-input" id="set-gate-pw" placeholder="••••" style="letter-spacing:4px;text-align:center"/>
+    </div>
+    <div id="set-gate-err" style="color:var(--danger);font-size:12px;margin-bottom:8px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">إلغاء</button>
+      <button class="btn btn-primary" onclick="verifySettingsGate()">دخول</button>
+    </div>
+  `);
+  document.getElementById('set-gate-pw').addEventListener('keydown', e => { if(e.key==='Enter') verifySettingsGate(); });
+}
+
+async function verifySettingsGate() {
+  const pw = document.getElementById('set-gate-pw').value;
+  const h = await hashStr(pw);
+  if (h === state.settings.settingsPw) {
+    settingsUnlocked = true;
+    closeModal();
+    openView('settings', document.getElementById('nav-settings'));
+  } else {
+    document.getElementById('set-gate-err').textContent = '❌ كلمة السر غلط';
+  }
+}
 
 function showSettingsPasswordPrompt() {
   showModal(`
