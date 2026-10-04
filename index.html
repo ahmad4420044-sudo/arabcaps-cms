@@ -351,7 +351,11 @@ function initFirebase() {
     // Listen for remote changes (from any device) and apply them locally in realtime
     fbRef.on('value', (snapshot) => {
       const remote = snapshot.val();
-      if (!remote) return; // nothing on server yet — our local data will push up on first save
+      if (!remote) {
+        // Nothing on the server yet (truly first run ever) — push our current local copy once to seed it
+        pushToFirebase();
+        return;
+      }
       fbApplyingRemote = true;
       state.instruments = remote.instruments || state.instruments;
       state.faulty = remote.faulty || state.faulty;
@@ -1667,9 +1671,9 @@ const STATUS_CFG = {
 async function init() {
   loadFromStorage();
   if (!state.instruments.length) initFromRawData();
+  initFirebase(); // attach the realtime listener FIRST so remote data (if any) wins over stale local data
   autoMarkPastMonths();
   autoArchive();
-  initFirebase();
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('main-app').classList.add('hidden');
   applyBranding();
@@ -1704,7 +1708,7 @@ function autoMarkPastMonths() {
       changed = true;
     }
   });
-  if (changed) saveToStorage();
+  if (changed) persistLocalOnly(); // local-only: do NOT push to Firebase automatically on every app open
 }
 
 // Archive: keep current year + 1 previous. When new year starts, previous-2 gets deleted.
@@ -1728,7 +1732,7 @@ function autoArchive() {
   Object.keys(state.archive).forEach(yr => {
     if (parseInt(yr) < prevYear) delete state.archive[yr];
   });
-  saveToStorage();
+  persistLocalOnly(); // local-only: do NOT push to Firebase automatically on every app open
 }
 
 // ========== STORAGE ==========
