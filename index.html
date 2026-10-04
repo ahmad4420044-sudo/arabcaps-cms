@@ -302,7 +302,7 @@ tr:hover td{background:#FAFBFC}
 <script>
 // ========== SIMPLE DOMAIN LOCK ==========
 (function(){
-  const ALLOWED_HOSTS = ['ahmad4420044-sudo.github.io']; // change this to your real GitHub Pages domain
+  const ALLOWED_HOSTS = ['ahmad4420044-sudo.github.io'];
   const protocol = window.location.protocol;
   const isWebProtocol = (protocol === 'http:' || protocol === 'https:');
   const host = window.location.hostname;
@@ -392,6 +392,7 @@ function pushToFirebase() {
 // ========== PASSWORDS ==========
 const PW_ADMIN    = '1bc3201a9f24a2fe48f634f90d406aaf6cbf5e36e292870ecba98d74b065ee1b'; // 1994
 const PW_SETTINGS = '6ed701cfedb16ebd91b2d185383115c6f9ce12f2f9c744d7d605be0002109362'; // 1952
+const PW_MASTER_CHANGE = 'b1556dea32e9d0cdbfed038fd7787275775ea40939c146a64e205bcb349ad02f'; // 112 — guards changing the main login password
 const PW_MANAGER  = '40510175845988f13f6162ed8526f0b09f73384467fa855e1e79b44a56562a58'; // 1000 default
 
 // ========== STATE ==========
@@ -2292,6 +2293,10 @@ function openAddInst(month) {
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">الرقم التسلسلي / السيريال نمبر (إن وُجد)</label>
+      <input class="form-input" id="fi-serial" placeholder="اتركه فارغاً إذا غير موجود" style="direction:ltr"/>
+    </div>
+    <div class="form-group">
       <label class="form-label">ملاحظات</label>
       <input class="form-input" id="fi-notes" placeholder="أي ملاحظات..."/>
     </div>
@@ -2320,6 +2325,7 @@ function saveNewInst() {
     status: month<cm?'done':month===cm?'due':'pending',
     executedDate: month<cm ? new Date().toISOString().split('T')[0] : '',
     notes: document.getElementById('fi-notes').value.trim(),
+    serial: document.getElementById('fi-serial').value.trim(),
     addedBy: 'user', certReceived: false
   };
   state.instruments.push(newInst);
@@ -2377,6 +2383,10 @@ function openInstModal(id) {
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">الرقم التسلسلي / السيريال نمبر (إن وُجد)</label>
+      <input class="form-input" id="ei-serial" value="${inst.serial||''}" placeholder="اتركه فارغاً إذا غير موجود" style="direction:ltr"/>
+    </div>
+    <div class="form-group">
       <label class="form-label">ملاحظات</label>
       <input class="form-input" id="ei-notes" value="${inst.notes||''}"/>
     </div>
@@ -2404,6 +2414,7 @@ function saveEditInst(id) {
   inst.status = document.getElementById('ei-status').value;
   inst.executedDate = document.getElementById('ei-date').value;
   inst.notes = document.getElementById('ei-notes').value.trim();
+  inst.serial = document.getElementById('ei-serial').value.trim();
   saveToStorage(); closeModal(); render(state.currentView); toast('✅ تم الحفظ');
 }
 
@@ -2764,13 +2775,21 @@ function previewQuote() {
   const today = new Date().toLocaleDateString('ar-EG');
   const companyName = state.settings.companyName || 'ARABCAPS';
 
-  let rows = mInsts.map((inst,idx)=>`
-    <tr>
-      <td>${idx+1}</td>
-      <td>${inst.item}</td>
-      <td>${inst.location}</td>
-      <td style="direction:ltr">${inst.code}</td>
-    </tr>`).join('');
+  const qSections = [...new Set(mInsts.map(i=>i.section))];
+  let runningNum = 0;
+  let rows = '';
+  qSections.forEach(sec=>{
+    rows += `<tr><td colspan="4" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">${sec}</td></tr>`;
+    mInsts.filter(i=>i.section===sec).forEach(inst=>{
+      runningNum++;
+      rows += `<tr>
+        <td>${runningNum}</td>
+        <td>${inst.item}</td>
+        <td>${inst.location}</td>
+        <td style="direction:ltr">${inst.code}</td>
+      </tr>`;
+    });
+  });
 
   document.getElementById('quote-preview').innerHTML = `
     <div class="quote-paper" id="quote-print">
@@ -2782,7 +2801,7 @@ function previewQuote() {
       <div style="font-size:13px;font-weight:700;text-align:center;margin:10px 0;color:#1565C0">
         طلب عرض سعر — معايرة أجهزة ${MONTHS_AR[month]} ${cy}
       </div>
-      <p style="font-size:12px;margin-bottom:10px">نرجو التكرم بإرسال عرض سعركم الخاص بمعايرة الأجهزة والمعدات التالية:</p>
+      <p style="font-size:12px;margin-bottom:10px">نرجو التكرم بإرسال عرض سعركم الخاص بمعايرة الأجهزة والمعدات التالية (إجمالي ${runningNum} جهاز):</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2878,7 +2897,7 @@ function renderSettings() {
       </div>
     </div>
     <div class="set-section">
-      <div class="set-item" onclick="showChangePassword('admin')">
+      <div class="set-item" onclick="guardMasterPasswordChange()">
         <div class="set-left">
           <div class="set-icon" style="background:#E3F2FD">🔐</div>
           <div><div class="set-name">تغيير كلمة سر الدخول</div><div class="set-desc">كلمة سر الأدمن الرئيسية</div></div>
@@ -2983,6 +3002,32 @@ async function verifySettingsPw() {
     showChangePassword('settings');
   } else {
     document.getElementById('set-pw-err').textContent = '❌ كلمة السر غلط';
+  }
+}
+
+function guardMasterPasswordChange() {
+  showModal(`
+    <div class="modal-title">🔒 تأكيد الصلاحية</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">تغيير كلمة سر الدخول الرئيسية يحتاج كلمة سر إضافية للتأكيد</div>
+    <div class="form-group">
+      <input type="password" class="form-input" id="master-gate-pw" placeholder="••••" style="letter-spacing:4px;text-align:center"/>
+    </div>
+    <div id="master-gate-err" style="color:var(--danger);font-size:12px;margin-bottom:8px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">إلغاء</button>
+      <button class="btn btn-primary" onclick="verifyMasterGate()">تأكيد</button>
+    </div>
+  `);
+  document.getElementById('master-gate-pw').addEventListener('keydown', e => { if(e.key==='Enter') verifyMasterGate(); });
+}
+
+async function verifyMasterGate() {
+  const pw = document.getElementById('master-gate-pw').value;
+  const h = await hashStr(pw);
+  if (h === PW_MASTER_CHANGE) {
+    showChangePassword('admin');
+  } else {
+    document.getElementById('master-gate-err').textContent = '❌ كلمة السر غلط';
   }
 }
 
@@ -3100,14 +3145,22 @@ function previewMissingCerts() {
     return;
   }
 
-  let rows = missing.map((inst,idx)=>`
-    <tr>
-      <td>${idx+1}</td>
-      <td>${inst.item}</td>
-      <td>${inst.location}</td>
-      <td style="direction:ltr">${inst.code}</td>
-      <td>${MONTHS_AR[inst.month]}</td>
-    </tr>`).join('');
+  const mcSections = [...new Set(missing.map(i=>i.section))];
+  let mcRunning = 0;
+  let rows = '';
+  mcSections.forEach(sec=>{
+    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">${sec}</td></tr>`;
+    missing.filter(i=>i.section===sec).forEach(inst=>{
+      mcRunning++;
+      rows += `<tr>
+        <td>${mcRunning}</td>
+        <td>${inst.item}</td>
+        <td>${inst.location}</td>
+        <td style="direction:ltr">${inst.code}</td>
+        <td>${MONTHS_AR[inst.month]}</td>
+      </tr>`;
+    });
+  });
 
   document.getElementById('missingcerts-preview').innerHTML = `
     <div class="quote-paper" id="missingcerts-print">
@@ -3119,7 +3172,7 @@ function previewMissingCerts() {
       <div style="font-size:13px;font-weight:700;text-align:center;margin:10px 0;color:#1565C0">
         طلب شهادات معايرة لم تصل بعد
       </div>
-      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن:</p>
+      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن (إجمالي ${mcRunning} جهاز):</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الشهر</th></tr></thead>
         <tbody>${rows}</tbody>
