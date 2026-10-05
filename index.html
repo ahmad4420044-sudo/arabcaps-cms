@@ -2003,6 +2003,7 @@ function renderMonthly() {
             <button class="btn btn-xs" onclick="toggleCertReceived(${inst.id})" title="الشهادة وصلت" style="${inst.certReceived?'background:var(--success-light);border-color:var(--success);color:var(--success-dark)':''}">${inst.certReceived?'✅ شهادة':'⬜ شهادة'}</button>
             <button class="btn btn-xs" onclick="openPhotos(${inst.id})" title="صورة (اختياري)" style="${hasPhoto(inst.id)?'background:var(--success-light);border-color:var(--success)':''}">📷${hasPhoto(inst.id)?' ✓':''}</button>
             <button class="btn btn-xs btn-danger" onclick="markFaulty(${inst.id})" title="معطل">🔧</button>
+            <button class="btn btn-xs btn-danger" onclick="quickDeleteInst(${inst.id})" title="حذف الجهاز">🗑</button>
           </div>
         </td>`:'<td></td>'}
       </tr>`).join('');
@@ -2233,7 +2234,7 @@ function renderSearch() {
       <td style="font-size:11px;color:var(--text2)">${MONTHS_AR[inst.month]}</td>
       <td><span class="badge ${STATUS_CFG[inst.status]?.cls||'b-pending'}">${STATUS_CFG[inst.status]?.label||inst.status}</span></td>
       <td style="font-size:11px;color:var(--success-dark)">${inst.executedDate||'—'}</td>
-      ${!state.isManager?`<td><button class="btn btn-xs" onclick="openInstModal(${inst.id})">✏️</button></td>`:'<td></td>'}
+      ${!state.isManager?`<td><div style="display:flex;gap:3px"><button class="btn btn-xs" onclick="openInstModal(${inst.id})">✏️</button><button class="btn btn-xs btn-danger" onclick="quickDeleteInst(${inst.id})" title="حذف">🗑</button></div></td>`:'<td></td>'}
     </tr>`).join('');
 
   document.getElementById('view-search').innerHTML = `
@@ -2420,6 +2421,14 @@ function saveEditInst(id) {
   inst.notes = document.getElementById('ei-notes').value.trim();
   inst.serial = document.getElementById('ei-serial').value.trim();
   saveToStorage(); closeModal(); render(state.currentView); toast('✅ تم الحفظ');
+}
+
+function quickDeleteInst(id) {
+  const inst = state.instruments.find(i=>i.id===id);
+  if (!inst) return;
+  if (!confirm(`حذف "${inst.item}" (${inst.code}) نهائياً؟`)) return;
+  state.instruments = state.instruments.filter(i=>i.id!==id);
+  saveToStorage(); render(state.currentView); toast('🗑 تم حذف الجهاز');
 }
 
 function deleteInst(id) {
@@ -2783,7 +2792,7 @@ function previewQuote() {
   let runningNum = 0;
   let rows = '';
   qSections.forEach(sec=>{
-    rows += `<tr><td colspan="4" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">${sec}</td></tr>`;
+    rows += `<tr><td colspan="4" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">Section: ${sec}</td></tr>`;
     mInsts.filter(i=>i.section===sec).forEach(inst=>{
       runningNum++;
       rows += `<tr>
@@ -2801,11 +2810,9 @@ function previewQuote() {
         <div style="font-size:16px;font-weight:700;color:#1565C0">${companyName}</div>
       </div>
       <div style="font-size:12px;margin-bottom:8px">التاريخ: ${today}</div>
-      <div style="font-size:12px;margin-bottom:6px">السادة / ${company} المحترمين</div>
-      <div style="font-size:13px;font-weight:700;text-align:center;margin:10px 0;color:#1565C0">
-        طلب عرض سعر — معايرة أجهزة ${MONTHS_AR[month]} ${cy}
-      </div>
-      <p style="font-size:12px;margin-bottom:10px">نرجو التكرم بإرسال عرض سعركم الخاص بمعايرة الأجهزة والمعدات التالية (إجمالي ${runningNum} جهاز):</p>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">السادة / ${company}</div>
+      <div style="font-size:12px;margin-bottom:14px;text-align:center">تحية طيبة وبعد،،،</div>
+      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال عرض سعر لمعايرة أجهزة شهر ${MONTHS_AR[month]} ${cy} (إجمالي ${runningNum} جهاز):</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -3144,8 +3151,12 @@ function previewMissingCerts() {
   if (monthSel !== 'all') pool = pool.filter(i=>i.month===parseInt(monthSel));
   const missing = pool.filter(i=>!i.certReceived);
 
+  if (pool.length === 0) {
+    document.getElementById('missingcerts-preview').innerHTML = `<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">لا توجد أجهزة تم تنفيذ معايرتها بعد${monthSel!=='all'?' في هذا الشهر':''} — لا يوجد شيء لطلب شهادته</div></div>`;
+    return;
+  }
   if (missing.length === 0) {
-    document.getElementById('missingcerts-preview').innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">كل الشهادات مرفوعة${monthSel!=='all'?' لهذا الشهر':''}</div></div>`;
+    document.getElementById('missingcerts-preview').innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">كل شهادات الأجهزة المنفذة وصلت${monthSel!=='all'?' لهذا الشهر':''} (${pool.length} جهاز)</div></div>`;
     return;
   }
 
@@ -3153,7 +3164,7 @@ function previewMissingCerts() {
   let mcRunning = 0;
   let rows = '';
   mcSections.forEach(sec=>{
-    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">${sec}</td></tr>`;
+    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">Section: ${sec}</td></tr>`;
     missing.filter(i=>i.section===sec).forEach(inst=>{
       mcRunning++;
       rows += `<tr>
@@ -3172,10 +3183,8 @@ function previewMissingCerts() {
         <div style="font-size:16px;font-weight:700;color:#1565C0">${companyName}</div>
       </div>
       <div style="font-size:12px;margin-bottom:8px">التاريخ: ${today}</div>
-      <div style="font-size:12px;margin-bottom:6px">السادة / ${company} المحترمين</div>
-      <div style="font-size:13px;font-weight:700;text-align:center;margin:10px 0;color:#1565C0">
-        طلب شهادات معايرة لم تصل بعد
-      </div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">السادة / ${company}</div>
+      <div style="font-size:12px;margin-bottom:14px;text-align:center">تحية طيبة وبعد،،،</div>
       <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن (إجمالي ${mcRunning} جهاز):</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الشهر</th></tr></thead>
