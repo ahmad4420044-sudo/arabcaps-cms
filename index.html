@@ -330,17 +330,32 @@ let fbApp = null, fbDb = null, fbRef = null;
 let fbReady = false;
 let fbApplyingRemote = false; // guard against write-loop when applying a remote update
 let fbSyncTimer = null;
+let fbAutoMaintenanceDone = false; // run autoMarkPastMonths/autoArchive exactly once, only after real Firebase data has arrived
+
+// Convert a local array (each item has .id) into a Firebase-friendly {id: item} object, and back.
+function arrToObj(arr) {
+  const o = {};
+  (arr||[]).forEach(item => { if (item && item.id != null) o[item.id] = item; });
+  return o;
+}
+function objToArr(obj) {
+  if (!obj) return [];
+  return Object.values(obj);
+}
 
 function initFirebase() {
   try {
-    if (typeof firebase === 'undefined') { console.warn('Firebase SDK not loaded — working offline only'); return; }
+    if (typeof firebase === 'undefined') {
+      console.warn('Firebase SDK not loaded — working offline only');
+      if (!fbAutoMaintenanceDone) { fbAutoMaintenanceDone = true; autoMarkPastMonths(); autoArchive(); } // offline fallback: still runs locally
+      return;
+    }
     fbApp = firebase.initializeApp(firebaseConfig);
     fbDb = firebase.database();
-    fbDb.enablePersistence && true; // realtime database has built-in offline cache automatically
     fbRef = fbDb.ref('cms_data');
     fbReady = true;
 
-    // Show live connection status (works even without opening any specific view)
+    // Show live connection status
     fbDb.ref('.info/connected').on('value', (snap) => {
       const el = document.getElementById('sync-status');
       if (!el) return;
@@ -348,49 +363,158 @@ function initFirebase() {
       else el.innerHTML = '🔴 غير متصل — يعمل محلياً';
     });
 
-    // Listen for remote changes (from any device) and apply them locally in realtime
-    fbRef.on('value', (snapshot) => {
-      const remote = snapshot.val();
-      if (!remote) {
-        // Nothing on the server yet (truly first run ever) — push our current local copy once to seed it
-        pushToFirebase();
-        return;
-      }
-      fbApplyingRemote = true;
-      state.instruments = remote.instruments || state.instruments;
-      state.faulty = remote.faulty || state.faulty;
-      state.archive = remote.archive || state.archive;
-      state.settings = { ...state.settings, ...(remote.settings || {}) };
-      state.nextId = remote.nextId || state.nextId;
-      state.printHistory = remote.printHistory || state.printHistory;
-      // Persist the freshly-synced data locally too, so offline mode has the latest copy
-      persistLocalOnly();
-      fbApplyingRemote = false;
-      // Re-render whatever is currently visible so changes show instantly
+    const rerenderIfVisible = () => {
       if (document.getElementById('main-app') && !document.getElementById('main-app').classList.contains('hidden')) {
         applyBranding();
         render(state.currentView);
       }
-    }, (err) => { console.warn('Firebase sync error (working offline):', err); });
-  } catch(e) { console.warn('Firebase init failed — working offline only:', e); }
+    };
+
+    // ===== Per-collection realtime listeners =====
+    // Each listener updates ONLY its own slice of local state — one user's edit on one
+    // instrument never touches, overwrites, or races against another user's edit on a
+    // different instrument, because each instrument lives at its own path in the database.
+
+    fbRef.child('instruments').on('value', (snap) => {
+      const remote = snap.val();
+      if (remote === null) {
+        // Server has no instruments collection yet at all (true first-ever run) — seed it once from local data.
+        if (state.instruments.length) fbRef.child('instruments').set(arrToObj(state.instruments));
+        if (!fbAutoMaintenanceDone) { fbAutoMaintenanceDone = true; autoMarkPastMonths(); autoArchive(); }
+        return;
+      }
+      fbApplyingRemote = true;
+      state.instruments = objToArr(remote);
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      // Run the once-per-load maintenance AFTER real shared data has landed locally — never before,
+      // so it never computes deltas against stale local data and never races another device's write.
+      if (!fbAutoMaintenanceDone) { fbAutoMaintenanceDone = true; autoMarkPastMonths(); autoArchive(); }
+      rerenderIfVisible();
+    }, (err) => { console.warn('Firebase instruments sync error:', err); });
+
+    fbRef.child('faulty').on('value', (snap) => {
+      const remote = snap.val();
+      fbApplyingRemote = true;
+      state.faulty = objToArr(remote);
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      rerenderIfVisible();
+    }, (err) => { console.warn('Firebase faulty sync error:', err); });
+
+    fbRef.child('photos').on('value', (snap) => {
+      const remote = snap.val();
+      fbApplyingRemote = true;
+      state.photos = remote || {};
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      rerenderIfVisible();
+    }, (err) => { console.warn('Firebase photos sync error:', err); });
+
+    fbRef.child('archive').on('value', (snap) => {
+      const remote = snap.val();
+      fbApplyingRemote = true;
+      state.archive = remote || {};
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      rerenderIfVisible();
+    }, (err) => { console.warn('Firebase archive sync error:', err); });
+
+    fbRef.child('settings').on('value', (snap) => {
+      const remote = snap.val();
+      if (remote === null) {
+        fbRef.child('settings').set(state.settings);
+        return;
+      }
+      fbApplyingRemote = true;
+      state.settings = { ...state.settings, ...remote };
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      applyBranding();
+      rerenderIfVisible();
+    }, (err) => { console.warn('Firebase settings sync error:', err); });
+
+    fbRef.child('nextId').on('value', (snap) => {
+      const remote = snap.val();
+      if (typeof remote === 'number') {
+        state.nextId = Math.max(state.nextId, remote);
+        persistLocalOnly();
+      }
+    }, (err) => { console.warn('Firebase nextId sync error:', err); });
+
+    fbRef.child('printHistory').on('value', (snap) => {
+      const remote = snap.val();
+      fbApplyingRemote = true;
+      state.printHistory = objToArr(remote).sort((a,b)=>b.id-a.id);
+      persistLocalOnly();
+      fbApplyingRemote = false;
+      if (state.currentView === 'history') rerenderIfVisible();
+    }, (err) => { console.warn('Firebase printHistory sync error:', err); });
+
+  } catch(e) {
+    console.warn('Firebase init failed — working offline only:', e);
+    if (!fbAutoMaintenanceDone) { fbAutoMaintenanceDone = true; autoMarkPastMonths(); autoArchive(); } // offline fallback: still runs locally
+  }
 }
 
-function pushToFirebase() {
-  if (!fbReady || fbApplyingRemote) return;
-  clearTimeout(fbSyncTimer);
-  // Debounce rapid successive saves into one network write
-  fbSyncTimer = setTimeout(() => {
-    try {
-      fbRef.set({
-        instruments: state.instruments,
-        faulty: state.faulty,
-        archive: state.archive,
-        settings: state.settings,
-        nextId: state.nextId,
-        printHistory: state.printHistory
-      });
-    } catch(e) { /* offline — Firebase SDK queues it automatically and sends when back online */ }
-  }, 400);
+// ===== Targeted sync helpers: each writes ONLY the specific record that changed,
+// never the whole collection — this is what prevents one user's save from erasing another's. =====
+function syncInstrument(inst) {
+  if (!fbReady || !inst) return;
+  try { fbRef.child('instruments').child(inst.id).set(inst); } catch(e) {}
+}
+function removeInstrumentRemote(id) {
+  if (!fbReady) return;
+  try { fbRef.child('instruments').child(id).remove(); } catch(e) {}
+}
+function syncFaultyItem(inst) {
+  if (!fbReady || !inst) return;
+  try { fbRef.child('faulty').child(inst.id).set(inst); } catch(e) {}
+}
+function removeFaultyRemote(id) {
+  if (!fbReady) return;
+  try { fbRef.child('faulty').child(id).remove(); } catch(e) {}
+}
+function syncPhotos(id) {
+  if (!fbReady) return;
+  try {
+    if (state.photos[id] && state.photos[id].some(x=>x)) fbRef.child('photos').child(id).set(state.photos[id]);
+    else fbRef.child('photos').child(id).remove();
+  } catch(e) {}
+}
+function syncSettings() {
+  if (!fbReady) return;
+  try { fbRef.child('settings').set(state.settings); } catch(e) {}
+}
+function syncNextId() {
+  if (!fbReady) return;
+  try { fbRef.child('nextId').set(state.nextId); } catch(e) {}
+}
+function syncArchiveYear(yr) {
+  if (!fbReady) return;
+  try {
+    if (state.archive[yr]) fbRef.child('archive').child(yr).set(state.archive[yr]);
+    else fbRef.child('archive').child(yr).remove();
+  } catch(e) {}
+}
+function removeArchiveYear(yr) {
+  if (!fbReady) return;
+  try { fbRef.child('archive').child(yr).remove(); } catch(e) {}
+}
+function syncPrintHistoryItem(entry) {
+  if (!fbReady || !entry) return;
+  try { fbRef.child('printHistory').child(entry.id).set(entry); } catch(e) {}
+}
+function clearPrintHistoryRemote() {
+  if (!fbReady) return;
+  try { fbRef.child('printHistory').remove(); } catch(e) {}
+}
+// Intentional full-collection replace — used ONLY for deliberate admin-triggered bulk
+// operations (uploading a brand-new instruction file, or starting a new year), where
+// replacing everything for everyone IS the intended behavior, not a race condition.
+function fullReplaceInstruments(instrumentsArray) {
+  if (!fbReady) return;
+  try { fbRef.child('instruments').set(arrToObj(instrumentsArray)); } catch(e) {}
 }
 
 // ========== PASSWORDS ==========
@@ -1671,9 +1795,7 @@ const STATUS_CFG = {
 async function init() {
   loadFromStorage();
   if (!state.instruments.length) initFromRawData();
-  initFirebase(); // attach the realtime listener FIRST so remote data (if any) wins over stale local data
-  autoMarkPastMonths();
-  autoArchive();
+  initFirebase(); // autoMarkPastMonths()/autoArchive() run inside this, once, AFTER real Firebase data arrives
   document.getElementById('login-page').style.display = 'flex';
   document.getElementById('main-app').classList.add('hidden');
   applyBranding();
@@ -1691,24 +1813,27 @@ function initFromRawData() {
     notes: '', addedBy: 'system'
   }));
   state.nextId = RAW_DATA.length + 1;
-  saveToStorage();
+  persistLocalOnly(); // Firebase listener will seed the server if it's truly empty
 }
 
 function autoMarkPastMonths() {
   const now = new Date(); const cm = now.getMonth()+1; const cy = now.getFullYear();
-  let changed = false;
+  const changedInsts = [];
   state.instruments.forEach(inst => {
     if (inst.year === cy && inst.month < cm && inst.status !== 'done') {
       inst.status = 'done';
       if (!inst.executedDate) inst.executedDate = `${cy}-${String(inst.month).padStart(2,'0')}-01`;
-      changed = true;
+      changedInsts.push(inst);
     }
     if (inst.year === cy && inst.month === cm && inst.status === 'pending') {
       inst.status = 'due';
-      changed = true;
+      changedInsts.push(inst);
     }
   });
-  if (changed) persistLocalOnly(); // local-only: do NOT push to Firebase automatically on every app open
+  if (changedInsts.length) {
+    persistLocalOnly();
+    changedInsts.forEach(syncInstrument); // sync ONLY the records that actually changed, via their own path
+  }
 }
 
 // Archive: keep current year + 1 previous. When new year starts, previous-2 gets deleted.
@@ -1717,6 +1842,7 @@ function autoArchive() {
   // Move completed months of previous year to archive
   const prevYear = cy - 1;
   const prevInsts = state.instruments.filter(i => i.year === prevYear);
+  const archivedIds = [];
   if (prevInsts.length > 0) {
     if (!state.archive[prevYear]) state.archive[prevYear] = {};
     prevInsts.forEach(inst => {
@@ -1725,14 +1851,21 @@ function autoArchive() {
       if (!state.archive[prevYear][m].find(a => a.id === inst.id)) {
         state.archive[prevYear][m].push({...inst});
       }
+      archivedIds.push(inst.id);
     });
     state.instruments = state.instruments.filter(i => i.year !== prevYear);
   }
   // Delete archives older than 1 year back (keep only prevYear)
+  let deletedOldYear = null;
   Object.keys(state.archive).forEach(yr => {
-    if (parseInt(yr) < prevYear) delete state.archive[yr];
+    if (parseInt(yr) < prevYear) { delete state.archive[yr]; deletedOldYear = yr; }
   });
-  persistLocalOnly(); // local-only: do NOT push to Firebase automatically on every app open
+  persistLocalOnly();
+  if (archivedIds.length) {
+    syncArchiveYear(prevYear);           // write the archived year's data to its own path
+    archivedIds.forEach(removeInstrumentRemote); // remove those instruments from the shared active list
+  }
+  if (deletedOldYear) removeArchiveYear(deletedOldYear);
 }
 
 // ========== STORAGE ==========
@@ -1745,9 +1878,9 @@ function persistLocalOnly() {
 }
 
 function saveToStorage() {
+  // Local cache only. Each mutation site calls its own targeted syncX()/removeXRemote()
+  // function right after this — there is no generic "push everything" call anymore.
   persistLocalOnly();
-  // Also push to Firebase (shared database) — works online, and queues automatically while offline
-  pushToFirebase();
 }
 
 function loadFromStorage() {
@@ -2064,7 +2197,7 @@ function markDone(id, date) {
   if (!inst) return;
   if (date) { inst.status='done'; inst.executedDate=date; }
   else { inst.status= inst.month<(new Date().getMonth()+1)?'late':'due'; inst.executedDate=''; }
-  saveToStorage(); renderMonthly(); toast('✅ تم التحديث');
+  saveToStorage(); syncInstrument(inst); renderMonthly(); toast('✅ تم التحديث');
 }
 
 function markMonthDone(m) {
@@ -2161,6 +2294,7 @@ function applyBatchMark() {
   const cy = state.settings.currentYear;
   const m = window._batchMonth;
   const now = new Date(); const cm = now.getMonth()+1;
+  const batchChanged = [];
   state.instruments.forEach(inst=>{
     if(inst.month===m && inst.year===cy && inst.status!=='faulty'){
       if(window._batchSelected.has(inst.id)){
@@ -2170,9 +2304,10 @@ function applyBatchMark() {
         inst.status = inst.month<cm?'late':inst.month===cm?'due':'pending';
         inst.executedDate='';
       }
+      batchChanged.push(inst);
     }
   });
-  saveToStorage(); closeModal(); renderMonthly();
+  saveToStorage(); batchChanged.forEach(syncInstrument); closeModal(); renderMonthly();
   toast(`✅ تم التحديث — ${window._batchSelected.size} جهاز نُفِّذ`);
 }
 
@@ -2180,7 +2315,7 @@ function toggleCertReceived(id) {
   const inst = state.instruments.find(i=>i.id===id);
   if (!inst) return;
   inst.certReceived = !inst.certReceived;
-  saveToStorage(); render(state.currentView);
+  saveToStorage(); syncInstrument(inst); render(state.currentView);
   toast(inst.certReceived ? '✅ تم تسجيل وصول الشهادة' : '↩ تم إلغاء تسجيل الشهادة');
 }
 
@@ -2191,7 +2326,7 @@ function markFaulty(id) {
   const faultyInst = {...inst};
   state.faulty.push(faultyInst);
   state.instruments = state.instruments.filter(i=>i.id!==id);
-  saveToStorage(); renderMonthly(); toast('🔧 تم وضع الجهاز كمعطل');
+  saveToStorage(); removeInstrumentRemote(id); syncFaultyItem(faultyInst); renderMonthly(); toast('🔧 تم وضع الجهاز كمعطل');
 }
 
 // ========== SEARCH / ALL ==========
@@ -2334,7 +2469,7 @@ function saveNewInst() {
     addedBy: 'user', certReceived: false
   };
   state.instruments.push(newInst);
-  saveToStorage(); closeModal();
+  saveToStorage(); syncInstrument(newInst); syncNextId(); closeModal();
   state.currentMonth = month;
   renderMonthly(); toast('✅ تم إضافة الجهاز');
 }
@@ -2420,7 +2555,7 @@ function saveEditInst(id) {
   inst.executedDate = document.getElementById('ei-date').value;
   inst.notes = document.getElementById('ei-notes').value.trim();
   inst.serial = document.getElementById('ei-serial').value.trim();
-  saveToStorage(); closeModal(); render(state.currentView); toast('✅ تم الحفظ');
+  saveToStorage(); syncInstrument(inst); closeModal(); render(state.currentView); toast('✅ تم الحفظ');
 }
 
 function quickDeleteInst(id) {
@@ -2428,13 +2563,13 @@ function quickDeleteInst(id) {
   if (!inst) return;
   if (!confirm(`حذف "${inst.item}" (${inst.code}) نهائياً؟`)) return;
   state.instruments = state.instruments.filter(i=>i.id!==id);
-  saveToStorage(); render(state.currentView); toast('🗑 تم حذف الجهاز');
+  saveToStorage(); removeInstrumentRemote(id); render(state.currentView); toast('🗑 تم حذف الجهاز');
 }
 
 function deleteInst(id) {
   if (!confirm('حذف هذا الجهاز نهائياً؟')) return;
   state.instruments = state.instruments.filter(i=>i.id!==id);
-  saveToStorage(); closeModal(); render(state.currentView); toast('🗑 تم الحذف');
+  saveToStorage(); removeInstrumentRemote(id); closeModal(); render(state.currentView); toast('🗑 تم الحذف');
 }
 
 // ========== PHOTOS ==========
@@ -2481,7 +2616,7 @@ function addPhoto(id, idx) {
     reader.onload = ev => {
       if (!state.photos[id]) state.photos[id] = [];
       state.photos[id][idx] = ev.target.result;
-      saveToStorage();
+      saveToStorage(); syncPhotos(id);
       const inst = state.instruments.find(i=>i.id===id)||state.faulty.find(i=>i.id===id);
       renderPhotosModal(id, inst?inst.item:'');
       toast('✅ تم إضافة الصورة');
@@ -2494,7 +2629,7 @@ function addPhoto(id, idx) {
 function delPhoto(id, idx) {
   if (!state.photos[id]) return;
   state.photos[id][idx] = null;
-  saveToStorage();
+  saveToStorage(); syncPhotos(id);
   const inst = state.instruments.find(i=>i.id===id)||state.faulty.find(i=>i.id===id);
   renderPhotosModal(id, inst?inst.item:'');
 }
@@ -2576,15 +2711,17 @@ function doTransfer() {
   if (toMonth===fromMonth) { toast('❗ الشهر المصدر والهدف متشابهان'); return; }
   if (!confirm(`ترحيل ${transferSelected.size} جهاز من ${MONTHS_AR[fromMonth]} إلى ${MONTHS_AR[toMonth]}؟`)) return;
   const now = new Date(); const cm = now.getMonth()+1;
+  const transferredInsts = [];
   transferSelected.forEach(id=>{
     const inst = state.instruments.find(i=>i.id===id);
     if (inst) {
       inst.month = toMonth;
       inst.status = toMonth<cm?'late':toMonth===cm?'due':'pending';
       inst.executedDate='';
+      transferredInsts.push(inst);
     }
   });
-  saveToStorage(); toast(`✅ تم ترحيل ${transferSelected.size} جهاز إلى ${MONTHS_AR[toMonth]}`);
+  saveToStorage(); transferredInsts.forEach(syncInstrument); toast(`✅ تم ترحيل ${transferSelected.size} جهاز إلى ${MONTHS_AR[toMonth]}`);
   transferSelected = new Set();
   renderTransfer();
 }
@@ -2632,13 +2769,13 @@ function restoreFromFaulty(id) {
   inst.status = 'pending'; inst.executedDate='';
   state.instruments.push(inst);
   state.faulty = state.faulty.filter(i=>i.id!==id);
-  saveToStorage(); renderFaulty(); toast('♻️ تم استعادة الجهاز');
+  saveToStorage(); removeFaultyRemote(id); syncInstrument(inst); renderFaulty(); toast('♻️ تم استعادة الجهاز');
 }
 
 function deleteFaulty(id) {
   if (!confirm('حذف نهائي؟')) return;
   state.faulty = state.faulty.filter(i=>i.id!==id);
-  saveToStorage(); renderFaulty(); toast('🗑 تم الحذف');
+  saveToStorage(); removeFaultyRemote(id); renderFaulty(); toast('🗑 تم الحذف');
 }
 
 // ========== ARCHIVE ==========
@@ -2704,13 +2841,13 @@ function viewArchiveMonth(yr, m) {
 function deleteArchiveMonth(yr, m) {
   if (!confirm(`حذف أرشيف ${MONTHS_AR[m]} ${yr}؟`)) return;
   if (state.archive[yr]) delete state.archive[yr][m];
-  saveToStorage(); renderArchive(); toast('🗑 تم حذف الشهر من الأرشيف');
+  saveToStorage(); syncArchiveYear(yr); renderArchive(); toast('🗑 تم حذف الشهر من الأرشيف');
 }
 
 function deleteArchiveYear(yr) {
   if (!confirm(`حذف كل أرشيف سنة ${yr}؟`)) return;
   delete state.archive[yr];
-  saveToStorage(); renderArchive(); toast('🗑 تم حذف السنة من الأرشيف');
+  saveToStorage(); removeArchiveYear(yr); renderArchive(); toast('🗑 تم حذف السنة من الأرشيف');
 }
 
 function addNewYear() {
@@ -2743,7 +2880,12 @@ function addNewYear() {
   state.settings.currentYear = newYear;
   state.currentMonth = 1;
   document.getElementById('hdr-sub').textContent = `ARABCAPS — ${newYear}`;
-  saveToStorage(); openView('dashboard'); toast(`✅ تم إضافة سنة ${newYear}`);
+  saveToStorage();
+  syncArchiveYear(cy);                 // archive the old year's data
+  if (!state.archive[toDelete]) removeArchiveYear(toDelete); // old archive auto-deleted
+  fullReplaceInstruments(state.instruments); // deliberate full replace: it's a new year for everyone
+  syncSettings(); syncNextId();
+  openView('dashboard'); toast(`✅ تم إضافة سنة ${newYear}`);
 }
 
 // ========== QUOTE ==========
@@ -2782,7 +2924,7 @@ function previewQuote() {
   const month = parseInt(document.getElementById('q-month').value);
   state.settings.calCompany = company;
   state.settings.calOfficer = officer;
-  saveToStorage();
+  saveToStorage(); syncSettings();
   const cy = state.settings.currentYear;
   const mInsts = state.instruments.filter(i=>i.month===month && i.year===cy);
   const today = new Date().toLocaleDateString('ar-EG');
@@ -3072,7 +3214,7 @@ async function confirmChangePassword(type) {
   const h = await hashStr(pw1);
   const keyMap = {admin:'adminPw', manager:'managerPw', settings:'settingsPw'};
   if (keyMap[type]) state.settings[keyMap[type]] = h;
-  saveToStorage(); closeModal(); toast('✅ تم تغيير كلمة السر');
+  saveToStorage(); syncSettings(); closeModal(); toast('✅ تم تغيير كلمة السر');
 }
 
 function resetAllData() {
@@ -3142,7 +3284,7 @@ function previewMissingCerts() {
   const monthSel = document.getElementById('mc-month').value;
   state.settings.calCompany = company;
   state.settings.calOfficer = officer;
-  saveToStorage();
+  saveToStorage(); syncSettings();
   const cy = state.settings.currentYear;
   const companyName = state.settings.companyName || 'ARABCAPS';
   const today = new Date().toLocaleDateString('ar-EG');
@@ -3255,7 +3397,7 @@ function uploadCompanyLogo() {
     const reader = new FileReader();
     reader.onload = ev => {
       state.settings.companyLogo = ev.target.result;
-      saveToStorage();
+      saveToStorage(); syncSettings();
       applyBranding();
       showCompanySettings();
       toast('✅ تم اختيار الشعار وتحديثه في الواجهة');
@@ -3267,7 +3409,7 @@ function uploadCompanyLogo() {
 
 function removeCompanyLogo() {
   state.settings.companyLogo = '';
-  saveToStorage();
+  saveToStorage(); syncSettings();
   applyBranding();
   showCompanySettings();
 }
@@ -3275,7 +3417,7 @@ function removeCompanyLogo() {
 function saveCompanySettings() {
   state.settings.companyName = document.getElementById('cs-name').value.trim() || 'ARABCAPS';
   state.settings.firebaseConfig = document.getElementById('cs-firebase').value.trim();
-  saveToStorage();
+  saveToStorage(); syncSettings();
   applyBranding();
   closeModal(); renderSettings(); toast('✅ تم حفظ بيانات الشركة');
 }
@@ -3364,7 +3506,7 @@ function confirmUploadInstruction() {
     notes:'', addedBy:'upload'
   }));
   pendingUploadData = null;
-  saveToStorage(); closeModal(); openView('dashboard');
+  saveToStorage(); fullReplaceInstruments(state.instruments); syncNextId(); closeModal(); openView('dashboard');
   toast('✅ تم استبدال التعليمة بنجاح');
 }
 
@@ -3404,14 +3546,15 @@ async function sharePrint(elId, title) {
 
 function savePrintHistory(title, htmlContent) {
   if (!state.printHistory) state.printHistory = [];
-  state.printHistory.unshift({
+  const entry = {
     id: Date.now(),
     title: title,
     date: new Date().toLocaleString('ar-EG'),
     content: htmlContent
-  });
+  };
+  state.printHistory.unshift(entry);
   if (state.printHistory.length > 50) state.printHistory = state.printHistory.slice(0,50);
-  saveToStorage();
+  saveToStorage(); syncPrintHistoryItem(entry);
 }
 
 function renderHistory() {
@@ -3456,7 +3599,7 @@ function viewHistoryItem(id) {
 function clearPrintHistory() {
   if (!confirm('مسح كل سجل المطبوعات؟')) return;
   state.printHistory = [];
-  saveToStorage(); renderHistory(); toast('🗑 تم مسح السجل');
+  saveToStorage(); clearPrintHistoryRemote(); renderHistory(); toast('🗑 تم مسح السجل');
 }
 
 // ========== START ==========
