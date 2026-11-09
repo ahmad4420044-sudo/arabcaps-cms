@@ -160,7 +160,7 @@ tr:hover td{background:#FAFBFC}
 /* QUOTE */
 .quote-paper{background:#fff;padding:20px;font-size:12px;line-height:1.9;direction:rtl;border:1px solid var(--border);border-radius:10px}
 .quote-paper h3{text-align:center;color:var(--primary-dark);font-size:14px;margin-bottom:10px}
-.quote-tbl{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px}
+.quote-tbl{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px;direction:ltr}
 .quote-tbl th,.quote-tbl td{border:1px solid #bbb;padding:5px 7px;text-align:center}
 .quote-tbl th{background:#E3F2FD;font-weight:600}
 /* TOAST */
@@ -241,7 +241,7 @@ tr:hover td{background:#FAFBFC}
       <div class="hdr-title">نظام إدارة المعايرة</div>
       <div id="hdr-sub" class="hdr-sub">ARABCAPS — 2026</div>
       <div id="sync-status" style="font-size:9px;color:var(--text3)">⏳ جاري الاتصال...</div>
-      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v8 — الخزنة</div>
+      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9 — إصلاحات الترحيل والطباعة</div>
     </div>
     <div class="hdr-actions">
       <button class="icon-btn" onclick="openView('search')" title="بحث"><span class="em">🔍</span><span class="ib-label">بحث</span></button>
@@ -249,7 +249,7 @@ tr:hover td{background:#FAFBFC}
       <button class="icon-btn" onclick="openView('missingcerts')" title="طلب شهادات لم تأتِ بعد"><span class="em">📸</span><span class="ib-label">طلب شهادات</span></button>
       <button class="icon-btn" onclick="openView('khazna')" title="الخزنة وتكلفة المعايرة"><span class="em">💰</span><span class="ib-label">الخزنة</span></button>
       <button class="icon-btn" onclick="openView('history')" title="سجل المطبوعات"><span class="em">🗂️</span><span class="ib-label">سجل الطباعة</span></button>
-      <button class="icon-btn" onclick="window.print()" title="طباعة الصفحة الحالية"><span class="em">🖨️</span><span class="ib-label">طباعة</span></button>
+      <button class="icon-btn" onclick="printCurrentView()" title="طباعة الصفحة الحالية"><span class="em">🖨️</span><span class="ib-label">طباعة</span></button>
       <button class="icon-btn" onclick="promptManagerView()" title="تبديل وضع المدير" id="mgr-toggle-btn"><span class="em">👁️</span><span class="ib-label">عرض المدير</span></button>
     </div>
   </div>
@@ -2144,6 +2144,7 @@ function openView(name, navEl) {
   state.currentView = name;
   document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));
   const el = document.getElementById('view-'+name);
+  if (name==='transfer') { transferSelected = new Set(); }
   if (el) { el.classList.remove('hidden'); render(name); }
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const navTarget = navEl || document.getElementById('nav-'+name);
@@ -2710,6 +2711,7 @@ function openInstModal(id) {
 function saveEditInst(id) {
   const inst = state.instruments.find(i=>i.id===id);
   if (!inst) return;
+  const old = { section: inst.section, item: inst.item, code: inst.code||'', location: inst.location||'', serial: inst.serial||'', typeId: inst.typeId };
   let section = document.getElementById('ei-section').value;
   if (section==='__new__') section = document.getElementById('ei-newsec').value.trim()||inst.section;
   inst.section = section;
@@ -2722,7 +2724,21 @@ function saveEditInst(id) {
   inst.notes = document.getElementById('ei-notes').value.trim();
   inst.serial = document.getElementById('ei-serial').value.trim();
   { const tv = document.getElementById('ei-type').value; if (tv) inst.typeId = tv; else delete inst.typeId; }
-  saveToStorage(); syncInstrument(inst); closeModal(); render(state.currentView); toast('✅ تم الحفظ');
+  // Same device can exist as several records (other months / repeats): apply identity edits to all of them
+  const identityChanged = inst.item!==old.item || inst.section!==old.section || (inst.code||'')!==old.code ||
+    (inst.location||'')!==old.location || (inst.serial||'')!==old.serial || inst.typeId!==old.typeId;
+  const siblings = identityChanged ? state.instruments.filter(o => o.id!==inst.id && o.section===old.section &&
+    o.item===old.item && (o.code||'')===old.code) : [];
+  let applied = 0;
+  if (siblings.length && confirm(`الجهاز ده موجود في ${siblings.length} سجل تاني (شهور تانية). تطبّق نفس التعديل (الاسم/الكود/الموقع/القسم) عليهم؟`)) {
+    siblings.forEach(o => {
+      o.item = inst.item; o.section = inst.section; o.code = inst.code; o.location = inst.location; o.serial = inst.serial;
+      if (inst.typeId) o.typeId = inst.typeId; else delete o.typeId;
+      syncInstrument(o); applied++;
+    });
+  }
+  saveToStorage(); syncInstrument(inst); closeModal(); render(state.currentView);
+  toast(applied ? `✅ تم الحفظ وتحديث ${applied} سجل تاني` : '✅ تم الحفظ');
 }
 
 function quickDeleteInst(id) {
@@ -2820,16 +2836,19 @@ function delPhoto(id, idx) {
 // ========== TRANSFER ==========
 let transferSelected = new Set();
 let transferFrom = null;
+let transferTo = null;
 
 function renderTransfer() {
   const months = Array.from({length:12},(_,i)=>i+1);
   const cy = state.settings.currentYear;
   let fromOpts = months.map(m=>`<option value="${m}" ${m===state.currentMonth?'selected':''}>${MONTHS_AR[m]}</option>`).join('');
-  let toOpts = months.map(m=>`<option value="${m}" ${m===(state.currentMonth%12)+1?'selected':''}>${MONTHS_AR[m]}</option>`).join('');
+  const _selTo = transferTo || (state.currentMonth%12)+1;
+  let toOpts = months.map(m=>`<option value="${m}" ${m===_selTo?'selected':''}>${MONTHS_AR[m]}</option>`).join('');
 
   const fromMonth = transferFrom || state.currentMonth;
   const mInsts = state.instruments.filter(i=>i.month===fromMonth && i.year===cy && i.status!=='done');
-  transferSelected = new Set();
+  // keep only selections that still exist in this month's list
+  transferSelected = new Set([...transferSelected].filter(id => mInsts.some(i => i.id === id)));
 
   let listHtml = mInsts.length===0
     ? '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">لا توجد أجهزة غير منفذة في هذا الشهر</div></div>'
@@ -2848,11 +2867,11 @@ function renderTransfer() {
       <div class="form-grid" style="margin-bottom:10px">
         <div class="form-group">
           <label class="form-label">من شهر</label>
-          <select class="form-select" id="tr-from" onchange="transferFrom=parseInt(this.value);renderTransfer()">${fromOpts}</select>
+          <select class="form-select" id="tr-from" onchange="transferFrom=parseInt(this.value);transferSelected=new Set();renderTransfer()">${fromOpts}</select>
         </div>
         <div class="form-group">
           <label class="form-label">إلى شهر</label>
-          <select class="form-select" id="tr-to">${toOpts}</select>
+          <select class="form-select" id="tr-to" onchange="transferTo=parseInt(this.value)">${toOpts}</select>
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
@@ -2895,7 +2914,8 @@ function doTransfer() {
   if (!confirm(`ترحيل ${transferSelected.size} جهاز من ${MONTHS_AR[fromMonth]} إلى ${MONTHS_AR[toMonth]}؟`)) return;
   const now = new Date(); const cm = now.getMonth()+1;
   const transferredInsts = [];
-  transferSelected.forEach(id=>{
+  const movedCount = transferSelected.size;
+  [...transferSelected].forEach(id=>{
     const inst = state.instruments.find(i=>i.id===id);
     if (inst) {
       inst.month = toMonth;
@@ -2904,7 +2924,7 @@ function doTransfer() {
       transferredInsts.push(inst);
     }
   });
-  saveToStorage(); transferredInsts.forEach(syncInstrument); toast(`✅ تم ترحيل ${transferSelected.size} جهاز إلى ${MONTHS_AR[toMonth]}`);
+  saveToStorage(); transferredInsts.forEach(i => syncInstrument(i)); toast(`✅ تم ترحيل ${transferredInsts.length} جهاز إلى ${MONTHS_AR[toMonth]}`);
   transferSelected = new Set();
   renderTransfer();
 }
@@ -3117,7 +3137,7 @@ function previewQuote() {
   let runningNum = 0;
   let rows = '';
   qSections.forEach(sec=>{
-    rows += `<tr><td colspan="4" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">Section: ${sec}</td></tr>`;
+    rows += `<tr><td colspan="4" style="background:#E3F2FD;font-weight:700;text-align:left;padding:6px 8px">Section: ${sec}</td></tr>`;
     mInsts.filter(i=>i.section===sec).forEach(inst=>{
       runningNum++;
       rows += `<tr>
@@ -3142,7 +3162,7 @@ function previewQuote() {
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p style="font-size:12px;margin-top:10px">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
+      <p style="font-size:12px;margin-top:10px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
       <div style="margin-top:20px;font-size:12px">
         <div>مسؤول المعايرة</div>
         ${officer?`<div style="font-weight:600">${officer}</div>`:''}
@@ -3155,60 +3175,102 @@ function previewQuote() {
 function printQuote() {
   const content = document.getElementById('quote-print');
   if (!content) { previewQuote(); return; }
-  const win = window.open('','','width=800,height=600');
-  win.document.write(`<html dir="rtl"><head><meta charset="UTF-8"><style>
-    body{font-family:Arial,sans-serif;direction:rtl;padding:20px;font-size:12px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border:1px solid #aaa;padding:5px 7px;text-align:center}
-    th{background:#E3F2FD;font-weight:600}
-  </style></head><body>${content.innerHTML}</body></html>`);
-  win.document.close(); win.print(); win.close();
+  openPrintWindow(content.innerHTML, document.title);
+}
+
+
+// ========== CLEAN PRINT WINDOW (A4, page-break safe, LTR tables) ==========
+const PRINT_CSS = `
+  @page{size:A4;margin:12mm}
+  *{box-sizing:border-box}
+  body{font-family:Arial,Tahoma,sans-serif;direction:rtl;margin:0;padding:0;font-size:12px;line-height:1.8;color:#000}
+  table{width:100%;border-collapse:collapse;direction:ltr;margin:6px 0 12px}
+  th,td{border:1px solid #888;padding:5px 7px;text-align:center;font-size:11px}
+  th{background:#E3F2FD;font-weight:700}
+  thead{display:table-header-group}
+  tr,.keep{break-inside:avoid;page-break-inside:avoid}
+  .sec-title{background:#E3F2FD;font-weight:700;text-align:left;padding:6px 8px}
+  .month-title{font-size:14px;font-weight:700;color:#0D47A1;border-bottom:2px solid #1565C0;margin:14px 0 6px;padding-bottom:4px;break-after:avoid;page-break-after:avoid}
+  .sec-block{break-inside:auto}
+  p{margin:6px 0}
+`;
+function openPrintWindow(innerHtml, title) {
+  const win = window.open('', '', 'width=800,height=600');
+  if (!win) { toast('❗ المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة'); return; }
+  win.document.write(`<html dir="rtl"><head><meta charset="UTF-8"><title>${(title||'').replace(/</g,'&lt;')}</title><style>${PRINT_CSS}</style></head><body>${innerHtml}</body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); win.close(); }, 250);
+}
+function printCurrentView() {
+  const v = state.currentView;
+  if (v === 'instruction') return printInstruction();
+  if (v === 'quote') return printQuote();
+  if (v === 'missingcerts') return printMissingCerts();
+  const el = document.getElementById('view-' + v);
+  if (!el) return;
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('.no-print,button,.btn,.icon-btn,select,input').forEach(n => n.remove());
+  const companyName = state.settings.companyName || 'ARABCAPS';
+  openPrintWindow(`<div style="text-align:center;font-size:16px;font-weight:700;color:#1565C0;margin-bottom:8px">${companyName}</div>` + clone.innerHTML, companyName);
 }
 
 // ========== INSTRUCTION VIEW ==========
+let instFilter = { month: 'all', status: 'all' };
+function instFiltered() {
+  const cy = state.settings.currentYear;
+  return state.instruments.filter(i => i.year === cy
+    && (instFilter.month === 'all' || i.month === parseInt(instFilter.month))
+    && (instFilter.status === 'all' || (instFilter.status === 'notdone' ? i.status !== 'done' : i.status === instFilter.status)));
+}
+function buildInstructionDoc() {
+  const cy = state.settings.currentYear;
+  const companyName = state.settings.companyName || 'ARABCAPS';
+  const list = instFiltered();
+  const months = [...new Set(list.map(i => i.month))].sort((a, b) => a - b);
+  const stLabel = instFilter.status === 'all' ? 'كل الحالات' : instFilter.status === 'notdone' ? 'غير المنفذ' : (STATUS_CFG[instFilter.status] || {}).label;
+  const monLabel = instFilter.month === 'all' ? 'كل الشهور' : MONTHS_AR[parseInt(instFilter.month)];
+  let html = `<div style="text-align:center;margin-bottom:6px"><div style="font-size:16px;font-weight:700;color:#1565C0">${companyName}</div>
+    <div style="font-size:13px;font-weight:700;margin-top:4px">التعليمة — خطة المعايرة ${cy}</div>
+    <div style="font-size:11px;color:#555">${monLabel} — ${stLabel} — إجمالي ${list.length} جهاز</div></div>`;
+  if (!list.length) return html + '<p style="text-align:center;color:#888">لا توجد أجهزة مطابقة للفلتر</p>';
+  months.forEach(m => {
+    const mInsts = list.filter(i => i.month === m);
+    html += `<div class="month-title">📅 ${MONTHS_AR[m]} ${cy} — ${mInsts.length} جهاز</div>`;
+    [...new Set(mInsts.map(i => i.section))].sort().forEach(sec => {
+      const si = mInsts.filter(i => i.section === sec);
+      html += `<div class="sec-block"><table class="quote-tbl"><thead>
+        <tr><th colspan="6" class="sec-title" style="text-align:left;background:#E3F2FD">Section: ${sec} (${si.length})</th></tr>
+        <tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الحالة</th><th>التنفيذ</th></tr></thead><tbody>
+        ${si.map((inst, idx) => `<tr><td>${idx + 1}</td><td>${inst.item}</td><td>${inst.location || ''}</td>
+          <td style="direction:ltr">${inst.code || ''}</td><td>${(STATUS_CFG[inst.status] || {}).label || ''}</td><td>${inst.executedDate || '—'}</td></tr>`).join('')}
+        </tbody></table></div>`;
+    });
+  });
+  return html;
+}
 function renderInstruction() {
   const cy = state.settings.currentYear;
-  const months = [...new Set(state.instruments.map(i=>i.month))].sort((a,b)=>a-b);
-  let html = `<div class="card no-print">
+  const monthOpts = '<option value="all">كل الشهور</option>' + Array.from({length: 12}, (_, i) =>
+    `<option value="${i + 1}" ${String(instFilter.month) === String(i + 1) ? 'selected' : ''}>${MONTHS_AR[i + 1]}</option>`).join('');
+  const statusOpts = [['all', 'كل الحالات'], ['notdone', 'غير المنفذ']].concat(Object.entries(STATUS_CFG).map(([k, v]) => [k, v.label]))
+    .map(([k, l]) => `<option value="${k}" ${instFilter.status === k ? 'selected' : ''}>${l}</option>`).join('');
+  document.getElementById('view-instruction').innerHTML = `<div class="card no-print">
     <div class="card-title">📋 التعليمة — خطة المعايرة ${cy}</div>
-    <div style="font-size:11px;color:var(--text3)">جميع الأجهزة مرتبة حسب الشهر والقسم</div>
-    <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-      <button class="btn" onclick="window.print()">🖨️ طباعة</button>
-      <button class="btn" onclick="downloadPrintPdf('instruction-print','التعليمة الكاملة')">⬇️ تحميل PDF</button>
-      <button class="btn" onclick="sharePrint('instruction-print','التعليمة الكاملة')">📤 مشاركة</button>
+    <div class="form-grid" style="margin:8px 0">
+      <div class="form-group"><label class="form-label">الشهر</label>
+        <select class="form-select" onchange="instFilter.month=this.value;renderInstruction()">${monthOpts}</select></div>
+      <div class="form-group"><label class="form-label">الحالة</label>
+        <select class="form-select" onchange="instFilter.status=this.value;renderInstruction()">${statusOpts}</select></div>
     </div>
-  </div>
-  <div id="instruction-print">`;
-
-  months.forEach(m=>{
-    const mInsts = state.instruments.filter(i=>i.month===m && i.year===cy);
-    const sections = [...new Set(mInsts.map(i=>i.section))].sort();
-    html += `<div class="card">
-      <div style="font-size:14px;font-weight:700;color:var(--primary-dark);margin-bottom:8px;border-bottom:2px solid var(--primary-light);padding-bottom:6px">
-        📅 ${MONTHS_AR[m]} ${cy} — ${mInsts.length} جهاز
-      </div>`;
-    sections.forEach(sec=>{
-      const si = mInsts.filter(i=>i.section===sec);
-      html += `<div style="margin-bottom:10px">
-        <div style="font-size:12px;font-weight:600;background:#EEF2F7;padding:5px 10px;border-radius:6px;margin-bottom:4px">${sec}</div>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الحالة</th><th>التنفيذ</th></tr></thead>
-          <tbody>${si.map((inst,idx)=>`<tr>
-            <td style="color:var(--text3)">${idx+1}</td>
-            <td><div style="font-size:12px;font-weight:500">${inst.item}</div></td>
-            <td style="font-size:11px;color:var(--text2)">${inst.location}</td>
-            <td class="code-cell">${inst.code}</td>
-            <td><span class="badge ${STATUS_CFG[inst.status]?.cls||'b-pending'}">${STATUS_CFG[inst.status]?.label||''}</span></td>
-            <td style="font-size:11px;color:var(--success-dark)">${inst.executedDate||'—'}</td>
-          </tr>`).join('')}</tbody>
-        </table></div>
-      </div>`;
-    });
-    html += '</div>';
-  });
-  html += '</div>';
-  document.getElementById('view-instruction').innerHTML = html;
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn" onclick="printInstruction()">🖨️ طباعة</button>
+      <button class="btn" onclick="downloadPrintPdf('instruction-print','التعليمة')">⬇️ تحميل PDF</button>
+      <button class="btn" onclick="sharePrint('instruction-print','التعليمة')">📤 مشاركة</button>
+    </div></div>
+    <div id="instruction-print" class="quote-paper">${buildInstructionDoc()}</div>`;
 }
+function printInstruction() { openPrintWindow(buildInstructionDoc(), 'التعليمة'); }
 
 // ========== SETTINGS ==========
 function renderSettings() {
@@ -3495,7 +3557,7 @@ function previewMissingCerts() {
   let mcRunning = 0;
   let rows = '';
   mcSections.forEach(sec=>{
-    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">Section: ${sec}</td></tr>`;
+    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:left;padding:6px 8px">Section: ${sec}</td></tr>`;
     missing.filter(i=>i.section===sec).forEach(inst=>{
       mcRunning++;
       rows += `<tr>
@@ -3521,7 +3583,7 @@ function previewMissingCerts() {
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الشهر</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p style="font-size:12px;margin-top:10px">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
+      <p style="font-size:12px;margin-top:10px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
       <div style="margin-top:20px;font-size:12px">
         <div>مسؤول المعايرة</div>
         ${officer?`<div style="font-weight:600">${officer}</div>`:''}
@@ -3534,14 +3596,7 @@ function previewMissingCerts() {
 function printMissingCerts() {
   const content = document.getElementById('missingcerts-print');
   if (!content) { previewMissingCerts(); return; }
-  const win = window.open('','','width=800,height=600');
-  win.document.write(`<html dir="rtl"><head><meta charset="UTF-8"><style>
-    body{font-family:Arial,sans-serif;direction:rtl;padding:20px;font-size:12px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border:1px solid #aaa;padding:5px 7px;text-align:center}
-    th{background:#E3F2FD;font-weight:600}
-  </style></head><body>${content.innerHTML}</body></html>`);
-  win.document.close(); win.print(); win.close();
+  openPrintWindow(content.innerHTML, document.title);
 }
 
 // ========== COMPANY SETTINGS ==========
@@ -3710,7 +3765,8 @@ function downloadPrintPdf(elId, title) {
     filename: `${title}_${new Date().toISOString().split('T')[0]}.pdf`,
     image: { type: 'jpeg', quality: 0.98 },
     html2canvas: { scale: 2, useCORS: true },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.month-title'] }
   };
   html2pdf().set(opt).from(el).save().then(()=>{
     savePrintHistory(title, el.innerHTML);
@@ -4077,7 +4133,7 @@ function khazDocHeader(title, intro) {
 }
 function khazDocTotals(gross, label) {
   const t = khaznaMoney(gross);
-  return `<table class="quote-tbl" style="margin-top:12px">
+  return `<table class="quote-tbl" style="margin-top:12px;direction:rtl">
     <tr><td style="text-align:right;font-weight:600">${label} (قبل الخصم)</td><td style="width:34%">${fmtMoney(t.gross)} جنيه</td></tr>
     ${t.pct > 0 ? `<tr><td style="text-align:right">خصم ${t.pct}%</td><td>- ${fmtMoney(t.disc)} جنيه</td></tr>` : ''}
     <tr><td style="text-align:right;font-weight:700;background:#E3F2FD">الصافي المستحق</td><td style="font-weight:700;background:#E3F2FD">${fmtMoney(t.net)} جنيه</td></tr>
@@ -4086,7 +4142,7 @@ function khazDocTotals(gross, label) {
 function khazDocFooter() {
   const officer = state.settings.calOfficer || '';
   const companyName = state.settings.companyName || 'ARABCAPS';
-  return `<p style="font-size:12px;margin-top:12px">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
+  return `<p style="font-size:12px;margin-top:12px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
     <div style="margin-top:20px;font-size:12px"><div>مسؤول المعايرة</div>${officer ? `<div style="font-weight:600">${kEsc(officer)}</div>` : ''}<div style="color:#555">${kEsc(companyName)}</div></div>`;
 }
 function buildKhaznaDoc(m) {
@@ -4095,7 +4151,7 @@ function buildKhaznaDoc(m) {
   const secs = [...new Set(mo.items.map(x => x.inst.section))];
   let n = 0, rows = '';
   secs.forEach(sec => {
-    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:right;padding:6px 8px">Section: ${kEsc(sec)}</td></tr>`;
+    rows += `<tr><td colspan="5" style="background:#E3F2FD;font-weight:700;text-align:left;padding:6px 8px">Section: ${kEsc(sec)}</td></tr>`;
     mo.items.filter(x => x.inst.section === sec).forEach(x => {
       n++;
       rows += `<tr><td>${n}</td><td>${kEsc(x.inst.item)}</td><td>${kEsc(x.inst.location)}</td><td style="direction:ltr">${kEsc(x.inst.code)}</td><td>${x.p === null ? '—' : fmtMoney(x.p)}</td></tr>`;
@@ -4141,14 +4197,7 @@ function openKhaznaYear() { showKhazDoc(`ملخص تكلفة المعايرة ${
 function printKhazna() {
   const content = document.getElementById('khazna-print'); if (!content) return;
   savePrintHistory(khCurrentTitle, content.innerHTML);
-  const win = window.open('', '', 'width=800,height=600');
-  win.document.write(`<html dir="rtl"><head><meta charset="UTF-8"><style>
-    body{font-family:Arial,sans-serif;direction:rtl;padding:20px;font-size:12px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border:1px solid #aaa;padding:5px 7px;text-align:center}
-    th{background:#E3F2FD;font-weight:600}
-  </style></head><body>${content.innerHTML}</body></html>`);
-  win.document.close(); win.print(); win.close();
+  openPrintWindow(content.innerHTML, khCurrentTitle);
 }
 function pdfKhazna() { downloadPrintPdf('khazna-print', khCurrentTitle); }
 function shareKhazna() { sharePrint('khazna-print', khCurrentTitle); }
