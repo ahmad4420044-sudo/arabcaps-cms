@@ -241,7 +241,7 @@ tr:hover td{background:#FAFBFC}
       <div class="hdr-title">نظام إدارة المعايرة</div>
       <div id="hdr-sub" class="hdr-sub">ARABCAPS — 2026</div>
       <div id="sync-status" style="font-size:9px;color:var(--text3)">⏳ جاري الاتصال...</div>
-      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9 — إصلاحات الترحيل والطباعة</div>
+      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.1 — إصلاح الترحيل</div>
     </div>
     <div class="hdr-actions">
       <button class="icon-btn" onclick="openView('search')" title="بحث"><span class="em">🔍</span><span class="ib-label">بحث</span></button>
@@ -508,15 +508,27 @@ async function attachDataListeners() {
   } finally { fbAttaching = false; }
 }
 
+let flushing = false;
 function flushPendingInst() {
   if (!canWrite()) return;
+  const toSet = [];
   Object.keys(pendingInst).forEach(id => {
     if (pendingInst[id] === 'set') {
       const inst = state.instruments.find(i => String(i.id) === id);
-      if (inst) syncInstrument(inst); else delete pendingInst[id];
+      if (inst) toSet.push(inst); else delete pendingInst[id];
     } else removeInstrumentRemote(id);
   });
   savePending();
+  if (toSet.length) {
+    const upd = {}; toSet.forEach(i => { upd[String(i.id)] = clean(i); });
+    if (!flushing) {
+      flushing = true;
+      fbRef.child('instruments').update(upd)
+        .then(() => { toSet.forEach(i => { if (pendingInst[i.id] === 'set') delete pendingInst[i.id]; }); savePending(); })
+        .catch(err => reportSyncError('رفع تعديلات معلقة', err))
+        .finally(() => { flushing = false; });
+    }
+  }
 }
 
 function reportSyncError(label, err) {
@@ -537,6 +549,18 @@ function syncInstrument(inst) {
   fbRef.child('instruments').child(String(inst.id)).set(clean(inst))
     .then(() => { if (pendingInst[inst.id] === 'set') { delete pendingInst[inst.id]; savePending(); } reportSyncOk('instrument', inst.id); })
     .catch(err => reportSyncError('جهاز: ' + (inst.item || inst.id), err));
+}
+function syncInstruments(list) {
+  list = (list || []).filter(Boolean);
+  if (!list.length || !writable()) return;
+  list.forEach(i => { pendingInst[i.id] = 'set'; });
+  savePending();
+  if (!canWrite()) return;
+  const upd = {};
+  list.forEach(i => { upd[String(i.id)] = clean(i); });
+  fbRef.child('instruments').update(upd)
+    .then(() => { list.forEach(i => { if (pendingInst[i.id] === 'set') delete pendingInst[i.id]; }); savePending(); reportSyncOk('instruments-batch', list.length); })
+    .catch(err => reportSyncError('تحديث مجموعة أجهزة (' + list.length + ')', err));
 }
 function removeInstrumentRemote(id) {
   if (!writable()) return;
@@ -1936,7 +1960,7 @@ function autoMarkPastMonths() {
   });
   if (changedInsts.length) {
     persistLocalOnly();
-    changedInsts.forEach(syncInstrument); // sync ONLY the records that actually changed, via their own path
+    syncInstruments(changedInsts); // sync ONLY the records that actually changed, via their own path
   }
 }
 
@@ -2465,7 +2489,7 @@ function applyBatchMark() {
       batchChanged.push(inst);
     }
   });
-  saveToStorage(); batchChanged.forEach(syncInstrument); closeModal(); renderMonthly();
+  saveToStorage(); syncInstruments(batchChanged); closeModal(); renderMonthly();
   toast(`✅ تم التحديث — ${window._batchSelected.size} جهاز نُفِّذ`);
 }
 
@@ -2734,10 +2758,10 @@ function saveEditInst(id) {
     siblings.forEach(o => {
       o.item = inst.item; o.section = inst.section; o.code = inst.code; o.location = inst.location; o.serial = inst.serial;
       if (inst.typeId) o.typeId = inst.typeId; else delete o.typeId;
-      syncInstrument(o); applied++;
+      applied++;
     });
   }
-  saveToStorage(); syncInstrument(inst); closeModal(); render(state.currentView);
+  saveToStorage(); syncInstruments([inst].concat(applied ? siblings : [])); closeModal(); render(state.currentView);
   toast(applied ? `✅ تم الحفظ وتحديث ${applied} سجل تاني` : '✅ تم الحفظ');
 }
 
@@ -2924,7 +2948,7 @@ function doTransfer() {
       transferredInsts.push(inst);
     }
   });
-  saveToStorage(); transferredInsts.forEach(i => syncInstrument(i)); toast(`✅ تم ترحيل ${transferredInsts.length} جهاز إلى ${MONTHS_AR[toMonth]}`);
+  saveToStorage(); syncInstruments(transferredInsts); toast(`✅ تم ترحيل ${transferredInsts.length} جهاز إلى ${MONTHS_AR[toMonth]}`);
   transferSelected = new Set();
   renderTransfer();
 }
