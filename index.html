@@ -241,7 +241,7 @@ tr:hover td{background:#FAFBFC}
       <div class="hdr-title">نظام إدارة المعايرة</div>
       <div id="hdr-sub" class="hdr-sub">ARABCAPS — 2026</div>
       <div id="sync-status" style="font-size:9px;color:var(--text3)">⏳ جاري الاتصال...</div>
-      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.1 — إصلاح الترحيل</div>
+      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.2 — إرجاع الشهور الأصلية</div>
     </div>
     <div class="hdr-actions">
       <button class="icon-btn" onclick="openView('search')" title="بحث"><span class="em">🔍</span><span class="ib-label">بحث</span></button>
@@ -2942,6 +2942,7 @@ function doTransfer() {
   [...transferSelected].forEach(id=>{
     const inst = state.instruments.find(i=>i.id===id);
     if (inst) {
+      if (inst.origMonth == null) inst.origMonth = inst.month;
       inst.month = toMonth;
       inst.status = toMonth<cm?'late':toMonth===cm?'due':'pending';
       inst.executedDate='';
@@ -3350,6 +3351,13 @@ function renderSettings() {
         </div>
         <span style="color:var(--text3)">›</span>
       </div>
+      <div class="set-item" onclick="restoreOriginalMonths()">
+        <div class="set-left">
+          <div class="set-icon" style="background:#E8F5E9">↩️</div>
+          <div><div class="set-name">إرجاع الأجهزة لشهورها الأصلية</div><div class="set-desc">يلغي كل الترحيلات ويرجّع كل جهاز لشهره الأصلي (من غير حذف أي بيانات)</div></div>
+        </div>
+        <span style="color:var(--text3)">›</span>
+      </div>
       <div class="set-item" onclick="resetAllData()">
         <div class="set-left">
           <div class="set-icon" style="background:#FFEBEE">🔄</div>
@@ -3490,6 +3498,35 @@ async function confirmChangePassword(type) {
   const keyMap = {admin:'adminPw', manager:'managerPw', settings:'settingsPw'};
   if (keyMap[type]) state.settings[keyMap[type]] = h;
   saveToStorage(); syncSettings(); closeModal(); toast('✅ تم تغيير كلمة السر');
+}
+
+
+// Undo all transfers: put every device back in its ORIGINAL month. Touches only month/status/executedDate. Never deletes anything.
+function restoreOriginalMonths() {
+  const cy = state.settings.currentYear;
+  const cm = new Date().getMonth() + 1;
+  const key = (sec, item, code) => [sec, item, code || ''].join('||');
+  const rawMap = {};
+  RAW_DATA.forEach(d => { rawMap[key(d[0], d[1], d[4])] = d[3]; });
+  const changes = [];
+  state.instruments.forEach(i => {
+    if (i.year !== cy) return;
+    const orig = (i.origMonth != null) ? i.origMonth : rawMap[key(i.section, i.item, i.code)];
+    if (orig != null && orig !== i.month) changes.push([i, orig]);
+  });
+  if (!changes.length) { toast('✅ كل الأجهزة في شهورها الأصلية بالفعل'); return; }
+  if (!confirm(`هيتم إرجاع ${changes.length} جهاز لشهورهم الأصلية.\nمفيش حاجة هتتحذف، والأسماء والأكواد والصور زي ما هي.\nنكمّل؟`)) return;
+  const touched = [];
+  changes.forEach(([i, orig]) => {
+    i.month = orig;
+    if (i.status !== 'done') i.status = orig < cm ? 'late' : orig === cm ? 'due' : 'pending';
+    delete i.origMonth;
+    touched.push(i);
+  });
+  state.instruments.forEach(i => { if (i.origMonth != null && i.origMonth === i.month) { delete i.origMonth; touched.push(i); } });
+  saveToStorage(); syncInstruments(touched);
+  render(state.currentView);
+  toast(`✅ تم إرجاع ${changes.length} جهاز لشهورهم الأصلية`);
 }
 
 function resetAllData() {
