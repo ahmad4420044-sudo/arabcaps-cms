@@ -241,7 +241,7 @@ tr:hover td{background:#FAFBFC}
       <div class="hdr-title">نظام إدارة المعايرة</div>
       <div id="hdr-sub" class="hdr-sub">ARABCAPS — 2026</div>
       <div id="sync-status" style="font-size:9px;color:var(--text3)">⏳ جاري الاتصال...</div>
-      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.2 — إرجاع الشهور الأصلية</div>
+      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.3 — كشف المتكرر</div>
     </div>
     <div class="hdr-actions">
       <button class="icon-btn" onclick="openView('search')" title="بحث"><span class="em">🔍</span><span class="ib-label">بحث</span></button>
@@ -2899,6 +2899,7 @@ function renderTransfer() {
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="openDuplicates()">🔍 المتكرر</button>
         <button class="btn btn-sm btn-primary" onclick="selectAllTransfer()">تحديد الكل</button>
         <button class="btn btn-sm" onclick="transferSelected=new Set();renderTransfer()">إلغاء التحديد</button>
       </div>
@@ -3351,6 +3352,13 @@ function renderSettings() {
         </div>
         <span style="color:var(--text3)">›</span>
       </div>
+      <div class="set-item" onclick="openDuplicates()">
+        <div class="set-left">
+          <div class="set-icon" style="background:#FFF8E1">🔍</div>
+          <div><div class="set-name">الأجهزة المتكررة في أكتر من شهر</div><div class="set-desc">اعرض كل الأجهزة المتشابهة واختار الشهر اللي تفضل فيه</div></div>
+        </div>
+        <span style="color:var(--text3)">›</span>
+      </div>
       <div class="set-item" onclick="restoreOriginalMonths()">
         <div class="set-left">
           <div class="set-icon" style="background:#E8F5E9">↩️</div>
@@ -3527,6 +3535,83 @@ function restoreOriginalMonths() {
   saveToStorage(); syncInstruments(touched);
   render(state.currentView);
   toast(`✅ تم إرجاع ${changes.length} جهاز لشهورهم الأصلية`);
+}
+
+
+// ========== DUPLICATES: same device in several months -> keep it in ONE month ==========
+function removeInstruments(ids) {
+  ids = (ids || []).filter(x => x != null);
+  if (!ids.length || !writable()) return;
+  ids.forEach(id => { pendingInst[id] = 'remove'; });
+  savePending();
+  if (!canWrite()) return;
+  const upd = {}; ids.forEach(id => { upd[String(id)] = null; });
+  fbRef.child('instruments').update(upd)
+    .then(() => { ids.forEach(id => { if (pendingInst[id] === 'remove') delete pendingInst[id]; }); savePending(); })
+    .catch(err => reportSyncError('حذف مجموعة أجهزة', err));
+}
+function _normKey(x) { return String(x || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function findDuplicateGroups() {
+  const cy = state.settings.currentYear;
+  const groups = {};
+  state.instruments.filter(i => i.year === cy).forEach(i => {
+    const code = _normKey(i.code);
+    const k = _normKey(i.section) + '||' + (code ? 'c:' + code : 'n:' + _normKey(i.item) + '|' + _normKey(i.location));
+    (groups[k] = groups[k] || []).push(i);
+  });
+  return Object.values(groups).filter(g => g.length > 1)
+    .map(g => g.sort((a, b) => a.month - b.month))
+    .sort((a, b) => (a[0].section + a[0].item).localeCompare(b[0].section + b[0].item));
+}
+function openDuplicates() {
+  if (!writable()) { toast('❗ وضع العرض للمدير — للقراءة فقط'); return; }
+  const groups = findDuplicateGroups();
+  const hasPh = id => normPhoto(state.photos[id]).some(Boolean);
+  const body = groups.length ? groups.map((g, gi) => `
+    <div class="card" style="margin:8px 0;padding:10px">
+      <div style="font-weight:700;font-size:13px">${g[0].item}</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">${g[0].section}${g[0].code ? ' — ' + g[0].code : ''} · موجود في ${g.length} شهور</div>
+      ${g.map(i => `<div style="display:flex;align-items:center;gap:6px;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border,#eee)">
+        <div style="font-size:12px"><b>${MONTHS_AR[i.month]}</b> — ${(STATUS_CFG[i.status] || {}).label || ''}${i.executedDate ? ' (' + i.executedDate + ')' : ''}${hasPh(i.id) ? ' 📷' : ''}</div>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-sm btn-primary" onclick="keepOnlyHere(${i.id})">✅ أبقيه هنا</button>
+          <button class="btn btn-sm" onclick="deleteDuplicateOne(${i.id})">🗑</button>
+        </div></div>`).join('')}
+    </div>`).join('') : '<p style="text-align:center;color:var(--text2);padding:20px">✅ مفيش أجهزة مكررة في أكتر من شهر</p>';
+  showModal(`<div class="modal-title">🔍 الأجهزة المتكررة في أكتر من شهر (${groups.length})</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:6px">"أبقيه هنا" بيحذف باقي نسخ الجهاز من الشهور التانية. 🗑 بيحذف النسخة دي بس.</div>
+    ${body}
+    <div class="modal-footer"><button class="btn btn-block" onclick="closeModal()">إغلاق</button></div>`);
+}
+function _moveDupPhotos(fromId, toId) {
+  const has = id => normPhoto(state.photos[id]).some(Boolean);
+  if (has(fromId) && !has(toId)) { state.photos[toId] = state.photos[fromId]; syncPhotos(toId); }
+  if (state.photos[fromId]) { delete state.photos[fromId]; syncPhotos(fromId); }
+}
+function keepOnlyHere(id) {
+  const keep = state.instruments.find(i => i.id === id); if (!keep) return;
+  const g = findDuplicateGroups().find(gr => gr.some(i => i.id === id)); if (!g) return;
+  const others = g.filter(i => i.id !== id);
+  const doneOnes = others.filter(i => i.status === 'done' || i.executedDate);
+  let msg = `الإبقاء على "${keep.item}" في ${MONTHS_AR[keep.month]} فقط وحذف ${others.length} نسخة من: ${others.map(i => MONTHS_AR[i.month]).join('، ')}؟`;
+  if (doneOnes.length) msg += `\n⚠️ فيهم ${doneOnes.length} نسخة منفّذة (تاريخ تنفيذ) هتتحذف.`;
+  if (!confirm(msg)) return;
+  others.forEach(o => _moveDupPhotos(o.id, id));
+  const ids = others.map(o => o.id);
+  state.instruments = state.instruments.filter(i => !ids.includes(i.id));
+  saveToStorage(); removeInstruments(ids);
+  render(state.currentView); openDuplicates(); toast(`🗑 اتحذف ${ids.length} نسخة`);
+}
+function deleteDuplicateOne(id) {
+  const inst = state.instruments.find(i => i.id === id); if (!inst) return;
+  const g = findDuplicateGroups().find(gr => gr.some(i => i.id === id));
+  if (!g || g.length < 2) return;
+  const other = g.find(i => i.id !== id);
+  if (!confirm(`حذف "${inst.item}" من ${MONTHS_AR[inst.month]}؟` + ((inst.status === 'done' || inst.executedDate) ? '\n⚠️ النسخة دي منفّذة.' : ''))) return;
+  _moveDupPhotos(id, other.id);
+  state.instruments = state.instruments.filter(i => i.id !== id);
+  saveToStorage(); removeInstruments([id]);
+  render(state.currentView); openDuplicates(); toast('🗑 تم الحذف');
 }
 
 function resetAllData() {
