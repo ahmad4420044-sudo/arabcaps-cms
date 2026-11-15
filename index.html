@@ -211,6 +211,7 @@ tr:hover td{background:#FAFBFC}
 .kh-price-input{width:92px;padding:7px 8px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;text-align:center;font-family:inherit;background:var(--card);color:var(--text)}
 .kh-price-input:focus{outline:none;border-color:var(--primary)}
 .kh-price-input:disabled{background:#F5F7FA;color:var(--text2)}
+.sig-tbl td{border:none!important}
 html[dir=ltr] body{direction:ltr}
 html[dir=ltr] .quote-paper{direction:ltr}
 </style>
@@ -243,7 +244,7 @@ html[dir=ltr] .quote-paper{direction:ltr}
       <div class="hdr-title">نظام إدارة المعايرة</div>
       <div id="hdr-sub" class="hdr-sub">ARABCAPS — 2026</div>
       <div id="sync-status" style="font-size:9px;color:var(--text3)">⏳ جاري الاتصال...</div>
-      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.4 — البحث واللغات</div>
+      <div style="font-size:9px;color:#1565C0;font-weight:700">الإصدار: v9.5 — Word ونائب رئيس القسم</div>
     </div>
     <div class="hdr-actions">
       <button class="icon-btn" id="lang-btn" onclick="toggleLang()" title="Language"><span class="em">🌐</span><span class="ib-label" id="lang-label">EN</span></button>
@@ -3137,6 +3138,17 @@ function addNewYear() {
 }
 
 // ========== QUOTE ==========
+
+// ========== SIGNATURE BLOCK: calibration officer (left) + QA deputy head (right) ==========
+function sigBlock(officer, deputy, company) {
+  const cell = (title, name, align) => `<td style="border:none;vertical-align:top;text-align:${align};width:50%;padding:4px 8px">
+    <div style="font-size:12px;font-weight:700">${title}</div>
+    ${name ? `<div style="font-size:12px;font-weight:600;margin-top:2px">${kEsc(name)}</div>` : ''}
+    <div style="font-size:11px;color:#555;margin-top:2px">${kEsc(company)}</div></td>`;
+  return `<table class="sig-tbl" style="width:100%;border-collapse:collapse;direction:ltr;margin-top:24px;border:none">
+    <tr>${cell('مسؤول المعايرة', officer, 'left')}${cell('نائب رئيس قسم الجودة', deputy, 'right')}</tr></table>`;
+}
+
 function renderQuote() {
   const months = Array.from({length:12},(_,i)=>i+1);
   const monthOpts = months.map(m=>`<option value="${m}" ${m===state.currentMonth?'selected':''}>${MONTHS_AR[m]}</option>`).join('');
@@ -3152,6 +3164,10 @@ function renderQuote() {
         <input class="form-input" id="q-officer" value="${state.settings.calOfficer||''}" placeholder="مثال: أحمد عادل"/>
       </div>
       <div class="form-group">
+        <label class="form-label">اسم نائب رئيس قسم الجودة</label>
+        <input class="form-input" id="q-deputy" value="${state.settings.qaDeputy||''}" placeholder="مثال: أحمد عادل"/>
+      </div>
+      <div class="form-group">
         <label class="form-label">الشهر المطلوب</label>
         <select class="form-select" id="q-month" onchange="previewQuote()">${monthOpts}</select>
       </div>
@@ -3159,6 +3175,7 @@ function renderQuote() {
         <button class="btn btn-primary" onclick="previewQuote()">👁 معاينة</button>
         <button class="btn" onclick="printQuote()">🖨️ طباعة</button>
         <button class="btn" onclick="downloadPrintPdf('quote-print','عرض سعر')">⬇️ تحميل PDF</button>
+        <button class="btn" onclick="downloadPrintDocx('quote-print','عرض سعر')">📝 تحميل Word</button>
         <button class="btn" onclick="sharePrint('quote-print','عرض سعر معايرة')">📤 مشاركة</button>
       </div>
       <div id="quote-preview"></div>
@@ -3169,9 +3186,11 @@ function renderQuote() {
 function previewQuote() {
   const company = document.getElementById('q-company').value.trim() || 'شركة المعايرة';
   const officer = document.getElementById('q-officer').value.trim();
+  const deputy = (document.getElementById('q-deputy') || {value:''}).value.trim();
   const month = parseInt(document.getElementById('q-month').value);
   state.settings.calCompany = company;
   state.settings.calOfficer = officer;
+  state.settings.qaDeputy = deputy;
   saveToStorage(); syncSettings();
   const cy = state.settings.currentYear;
   const mInsts = state.instruments.filter(i=>i.month===month && i.year===cy);
@@ -3202,17 +3221,13 @@ function previewQuote() {
       <div style="font-size:12px;margin-bottom:8px">التاريخ: ${today}</div>
       <div style="font-size:13px;font-weight:600;margin-bottom:10px">السادة / ${company}</div>
       <div style="font-size:12px;margin-bottom:14px;text-align:center">تحية طيبة وبعد،،،</div>
-      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال عرض سعر لمعايرة أجهزة شهر ${MONTHS_AR[month]} ${cy} (إجمالي ${runningNum} جهاز):</p>
+      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال عرض سعر لمعايرة أجهزة شهر ${MONTHS_AR[month]} ${cy} بإجمالي ${runningNum} جهاز:</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p style="font-size:12px;margin-top:10px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
-      <div style="margin-top:20px;font-size:12px">
-        <div>مسؤول المعايرة</div>
-        ${officer?`<div style="font-weight:600">${officer}</div>`:''}
-        <div style="color:#555">${companyName}</div>
-      </div>
+      ${sigBlock(officer, deputy, companyName)}
     </div>
   `;
 }
@@ -3238,6 +3253,8 @@ const PRINT_CSS = `
   .month-title{font-size:14px;font-weight:700;color:#0D47A1;border-bottom:2px solid #1565C0;margin:14px 0 6px;padding-bottom:4px;break-after:avoid;page-break-after:avoid}
   .sec-block{break-inside:auto}
   p{margin:6px 0}
+  .sig-tbl,.sig-tbl td{border:none!important}
+  .sig-tbl{break-inside:avoid;page-break-inside:avoid}
 `;
 function openPrintWindow(innerHtml, title) {
   const win = window.open('', '', 'width=800,height=600');
@@ -3312,6 +3329,7 @@ function renderInstruction() {
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn" onclick="printInstruction()">🖨️ طباعة</button>
       <button class="btn" onclick="downloadPrintPdf('instruction-print','التعليمة')">⬇️ تحميل PDF</button>
+        <button class="btn" onclick="downloadPrintDocx('instruction-print','التعليمة')">📝 تحميل Word</button>
       <button class="btn" onclick="sharePrint('instruction-print','التعليمة')">📤 مشاركة</button>
     </div></div>
     <div id="instruction-print" class="quote-paper">${buildInstructionDoc()}</div>`;
@@ -3681,6 +3699,10 @@ function renderMissingCerts() {
         <input class="form-input" id="mc-officer" value="${state.settings.calOfficer||''}" placeholder="مثال: أحمد عادل"/>
       </div>
       <div class="form-group">
+        <label class="form-label">اسم نائب رئيس قسم الجودة</label>
+        <input class="form-input" id="mc-deputy" value="${state.settings.qaDeputy||''}" placeholder="مثال: أحمد عادل"/>
+      </div>
+      <div class="form-group">
         <label class="form-label">الشهر</label>
         <select class="form-select" id="mc-month" onchange="previewMissingCerts()">${monthOpts}</select>
       </div>
@@ -3688,6 +3710,7 @@ function renderMissingCerts() {
         <button class="btn btn-primary" onclick="previewMissingCerts()">👁 معاينة</button>
         <button class="btn" onclick="printMissingCerts()">🖨️ طباعة</button>
         <button class="btn" onclick="downloadPrintPdf('missingcerts-print','طلب شهادات')">⬇️ تحميل PDF</button>
+        <button class="btn" onclick="downloadPrintDocx('missingcerts-print','طلب شهادات')">📝 تحميل Word</button>
         <button class="btn" onclick="sharePrint('missingcerts-print','طلب شهادات لم تأتِ بعد')">📤 مشاركة</button>
       </div>
       <div id="missingcerts-preview"></div>
@@ -3698,9 +3721,11 @@ function renderMissingCerts() {
 function previewMissingCerts() {
   const company = document.getElementById('mc-company').value.trim() || 'شركة المعايرة';
   const officer = document.getElementById('mc-officer').value.trim();
+  const deputy = (document.getElementById('mc-deputy') || {value:''}).value.trim();
   const monthSel = document.getElementById('mc-month').value;
   state.settings.calCompany = company;
   state.settings.calOfficer = officer;
+  state.settings.qaDeputy = deputy;
   saveToStorage(); syncSettings();
   const cy = state.settings.currentYear;
   const companyName = state.settings.companyName || 'ARABCAPS';
@@ -3744,17 +3769,13 @@ function previewMissingCerts() {
       <div style="font-size:12px;margin-bottom:8px">التاريخ: ${today}</div>
       <div style="font-size:13px;font-weight:600;margin-bottom:10px">السادة / ${company}</div>
       <div style="font-size:12px;margin-bottom:14px;text-align:center">تحية طيبة وبعد،،،</div>
-      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن (إجمالي ${mcRunning} جهاز):</p>
+      <p style="font-size:12px;margin-bottom:10px">نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن بإجمالي ${mcRunning} جهاز:</p>
       <table class="quote-tbl">
         <thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>الشهر</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p style="font-size:12px;margin-top:10px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
-      <div style="margin-top:20px;font-size:12px">
-        <div>مسؤول المعايرة</div>
-        ${officer?`<div style="font-weight:600">${officer}</div>`:''}
-        <div style="color:#555">${companyName}</div>
-      </div>
+      ${sigBlock(officer, deputy, companyName)}
     </div>
   `;
 }
@@ -3921,6 +3942,206 @@ function confirmUploadInstruction() {
 }
 
 // ========== PDF DOWNLOAD, SHARE & PRINT HISTORY ==========
+
+// ===== PDF-safe copy: html2canvas draws each text string with an LTR base, which scrambles Arabic mixed with
+// numbers/punctuation. We wrap every Arabic word / number / punctuation mark in its own span so each piece is drawn alone;
+// the browser layout already puts the pieces in the right visual order. =====
+function pdfSafeClone(el) {
+  const clone = el.cloneNode(true);
+  clone.removeAttribute('id');
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + el.offsetWidth + 'px;';
+  host.appendChild(clone); document.body.appendChild(host);
+  const AR = /[\u0600-\u06FF]/;
+  const MIRROR = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<', '«': '»', '»': '«' };
+  const tw = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT); const nodes = [];
+  while (tw.nextNode()) nodes.push(tw.currentNode);
+  nodes.forEach(n => {
+    const v = n.nodeValue;
+    if (!AR.test(v) || !n.parentNode) return;
+    const rtl = getComputedStyle(n.parentNode).direction === 'rtl';
+    const frag = document.createDocumentFragment();
+    const re = /([\u0600-\u06FF]+)|([A-Za-z0-9]+(?:[\/\-._:%+,][A-Za-z0-9]+)*)|(\s+)|([^\s])/g; let m;
+    while ((m = re.exec(v))) {
+      if (m[3]) { frag.appendChild(document.createTextNode(m[3])); continue; }
+      const sp = document.createElement('span');
+      sp.textContent = m[0];
+      frag.appendChild(sp);
+    }
+    n.parentNode.replaceChild(frag, n);
+  });
+  return { clone, cleanup: () => host.remove() };
+}
+
+
+// ========== WORD (.docx) EXPORT — built in the browser, no libraries ==========
+(function () {
+  const BLOCK = { DIV: 1, P: 1, TABLE: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, UL: 1, OL: 1, SECTION: 1, HR: 1 };
+  const AR_RE = /[\u0600-\u06FF]/;
+  const esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  const hex = rgb => { const m = String(rgb).match(/\d+/g); if (!m) return '000000'; return m.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('').toUpperCase(); };
+
+  function physAlign(cs) {
+    let a = cs.textAlign, rtl = cs.direction === 'rtl';
+    if (a === 'start') a = rtl ? 'right' : 'left';
+    if (a === 'end') a = rtl ? 'left' : 'right';
+    if (a === 'justify') a = rtl ? 'right' : 'left';
+    return a;
+  }
+  function runXml(text, st) {
+    // split into Arabic / non-Arabic pieces so Arabic runs get the RTL flag
+    const parts = text.match(/[\u0600-\u06FF]+(?:[\s\u00A0]+[\u0600-\u06FF]+)*|[^\u0600-\u06FF]+/g) || [];
+    return parts.map(p => {
+      const rtl = AR_RE.test(p);
+      return `<w:r><w:rPr>${st.b ? '<w:b/><w:bCs/>' : ''}<w:color w:val="${st.color}"/><w:sz w:val="${st.sz}"/><w:szCs w:val="${st.sz}"/>${rtl ? '<w:rtl/>' : ''}</w:rPr><w:t xml:space="preserve">${esc(p)}</w:t></w:r>`;
+    }).join('');
+  }
+  function collectRuns(node, out) {
+    if (node.nodeType === 3) {
+      const par = node.parentElement; if (!par) return;
+      const cs = getComputedStyle(par);
+      const t = node.nodeValue.replace(/\s+/g, ' ');
+      if (!t) return;
+      out.push({ text: t, st: { b: parseInt(cs.fontWeight, 10) >= 600 || cs.fontWeight === 'bold', color: hex(cs.color), sz: Math.max(14, Math.round(parseFloat(cs.fontSize) * 1.5)) } });
+    } else if (node.nodeType === 1) {
+      if (node.nodeName === 'BR') { out.push({ br: true }); return; }
+      if (node.nodeName === 'SCRIPT' || node.nodeName === 'STYLE') return;
+      node.childNodes.forEach(c => collectRuns(c, out));
+    }
+  }
+  function paraXml(nodes, styleEl, opts) {
+    opts = opts || {};
+    const runs = []; nodes.forEach(n => collectRuns(n, runs));
+    // trim leading/trailing spaces and collapse duplicates across runs
+    let prevSpace = true;
+    runs.forEach(r => { if (r.br) { prevSpace = true; return; } if (prevSpace && r.text[0] === ' ') r.text = r.text.slice(1); prevSpace = r.text.endsWith(' '); });
+    for (let i = runs.length - 1; i >= 0; i--) { if (runs[i].br) continue; runs[i].text = runs[i].text.replace(/ $/, ''); if (runs[i].text) break; }
+    const plain = runs.map(r => r.text || '').join('');
+    if (!plain.trim() && !runs.some(r => r.br)) return '';
+    const cs = getComputedStyle(styleEl);
+    const align = opts.align || physAlign(cs);
+    const hasAr = AR_RE.test(plain);
+    // Arabic + right/center -> RTL paragraph (default start = right). Left aligned -> LTR paragraph with RTL runs.
+    const bidi = hasAr && align !== 'left';
+    let jc = '';
+    if (align === 'center') jc = '<w:jc w:val="center"/>';
+    else if (!bidi) jc = align === 'right' ? '<w:jc w:val="right"/>' : '<w:jc w:val="left"/>';
+    const mb = Math.min(300, Math.max(0, Math.round((parseFloat(cs.marginBottom) || 0) * 15)));
+    const mt = Math.min(300, Math.max(0, Math.round((parseFloat(cs.marginTop) || 0) * 15)));
+    const sp = opts.tight ? '<w:spacing w:before="20" w:after="20"/>' : `<w:spacing w:before="${mt}" w:after="${Math.max(mb, 40)}"/>`;
+    const body = runs.map(r => r.br ? '<w:r><w:br/></w:r>' : runXml(r.text, r.st)).join('');
+    return `<w:p><w:pPr>${opts.keepNext ? '<w:keepNext/>' : ''}${bidi ? '<w:bidi/>' : ''}${sp}${jc}</w:pPr>${body}</w:p>`;
+  }
+  function hasBlockChild(el) { return Array.from(el.children).some(c => BLOCK[c.nodeName]); }
+
+  function tableXml(tbl) {
+    const rows = Array.from(tbl.querySelectorAll(':scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr, :scope > tr'));
+    if (!rows.length) return '';
+    const spanOf = c => parseInt(c.getAttribute('colspan') || '1', 10) || 1;
+    const nCols = Math.max(...rows.map(r => Array.from(r.children).reduce((a, c) => a + spanOf(c), 0)));
+    // column weights from text length
+    const w = new Array(nCols).fill(0), cnt = new Array(nCols).fill(0);
+    rows.forEach(r => { let ci = 0; Array.from(r.children).forEach(c => { const sp = spanOf(c); if (sp === 1) { w[ci] += Math.min(40, (c.textContent || '').trim().length); cnt[ci]++; } ci += sp; }); });
+    let weights = w.map((x, i) => Math.max(4, cnt[i] ? x / cnt[i] : 8));
+    const first = rows[0].children[0];
+    if (first && (first.textContent || '').trim() === '#') weights[0] = 2.5;
+    const tot = weights.reduce((a, b) => a + b, 0);
+    const TW = 10200;
+    const widths = weights.map(x => Math.round(TW * x / tot));
+    const bordered = rows.some(r => Array.from(r.children).some(c => getComputedStyle(c).borderTopStyle !== 'none'));
+    const bd = bordered ? ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(k => `<w:${k} w:val="single" w:sz="4" w:space="0" w:color="888888"/>`).join('')
+      : ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(k => `<w:${k} w:val="nil"/>`).join('');
+    const bodyRows = rows.map(r => {
+      const isHead = r.parentElement.nodeName === 'THEAD';
+      let ci = 0;
+      const cells = Array.from(r.children).map(c => {
+        const sp = spanOf(c);
+        const cw = widths.slice(ci, ci + sp).reduce((a, b) => a + b, 0); ci += sp;
+        const cs = getComputedStyle(c);
+        const bg = cs.backgroundColor; const hasBg = bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(bg);
+        const shd = hasBg ? `<w:shd w:val="clear" w:color="auto" w:fill="${hex(bg)}"/>` : '';
+        let inner = '';
+        if (hasBlockChild(c)) { inner = blocksXml(c, { tight: true }); }
+        else inner = paraXml(Array.from(c.childNodes), c, { tight: true });
+        if (!inner) inner = '<w:p/>';
+        return `<w:tc><w:tcPr><w:tcW w:w="${cw}" w:type="dxa"/>${sp > 1 ? `<w:gridSpan w:val="${sp}"/>` : ''}${shd}<w:vAlign w:val="center"/></w:tcPr>${inner}</w:tc>`;
+      }).join('');
+      return `<w:tr><w:trPr><w:cantSplit/>${isHead ? '<w:tblHeader/>' : ''}</w:trPr>${cells}</w:tr>`;
+    }).join('');
+    const grid = widths.map(x => `<w:gridCol w:w="${x}"/>`).join('');
+    return `<w:tbl><w:tblPr><w:tblW w:w="${TW}" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grid}</w:tblGrid>${bodyRows}</w:tbl><w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr></w:p>`;
+  }
+  function blocksXml(root, opts) {
+    let xml = '', buf = [];
+    const flush = () => { if (buf.length) { xml += paraXml(buf, root, opts); buf = []; } };
+    root.childNodes.forEach(n => {
+      if (n.nodeType === 1 && BLOCK[n.nodeName]) {
+        flush();
+        if (n.nodeName === 'TABLE') xml += tableXml(n);
+        else if (n.nodeName === 'HR') xml += '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="888888"/></w:pBdr></w:pPr></w:p>';
+        else if (hasBlockChild(n)) xml += blocksXml(n, opts);
+        else {
+          const isTitle = /month-title|sec-title/.test(n.className || '') || /^H\d$/.test(n.nodeName);
+          xml += paraXml(Array.from(n.childNodes), n, Object.assign({}, opts, { keepNext: isTitle }));
+        }
+      } else if (n.nodeType === 3 || (n.nodeType === 1 && n.nodeName !== 'SCRIPT' && n.nodeName !== 'STYLE')) buf.push(n);
+    });
+    flush();
+    return xml;
+  }
+
+  // ---- minimal ZIP (stored, no compression) ----
+  const CRC = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = buf => { let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function zip(files) {
+    const enc = new TextEncoder(); const chunks = []; const central = []; let offset = 0;
+    const u16 = v => [v & 255, (v >> 8) & 255], u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
+    files.forEach(f => {
+      const name = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
+      const head = new Uint8Array([0x50, 0x4B, 3, 4, 20, 0, 0, 8, 0, 0, 0, 0, 0x21, 0, ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), 0, 0]);
+      chunks.push(head, name, data);
+      central.push(new Uint8Array([0x50, 0x4B, 1, 2, 20, 0, 20, 0, 0, 8, 0, 0, 0, 0, 0x21, 0, ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...u32(offset)]), name);
+      offset += head.length + name.length + data.length;
+    });
+    let cdSize = 0; central.forEach(c => cdSize += c.length);
+    const end = new Uint8Array([0x50, 0x4B, 5, 6, 0, 0, 0, 0, ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), 0, 0]);
+    return new Blob([...chunks, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  }
+
+  window.buildDocxBlob = function (el) {
+    const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const body = blocksXml(el, {});
+    const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="850" w:bottom="850" w:left="850" w:header="400" w:footer="400" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:eastAsia="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-US" w:bidi="ar-EG"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="80" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`;
+    const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
+    const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+    const drels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+    return zip([
+      { name: '[Content_Types].xml', data: ct },
+      { name: '_rels/.rels', data: rels },
+      { name: 'word/document.xml', data: doc },
+      { name: 'word/styles.xml', data: styles },
+      { name: 'word/_rels/document.xml.rels', data: drels },
+    ]);
+  };
+})();
+
+function downloadPrintDocx(elId, title) {
+  const el = document.getElementById(elId);
+  if (!el) { toast('❗ اعمل معاينة أولاً'); return; }
+  try {
+    const blob = buildDocxBlob(el);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${title}_${new Date().toISOString().split('T')[0]}.docx`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    savePrintHistory(title, el.innerHTML);
+    toast('✅ تم تحميل الملف');
+  } catch (e) { console.error(e); toast('❌ حدث خطأ أثناء إنشاء الملف'); }
+}
+
 function downloadPrintPdf(elId, title) {
   const el = document.getElementById(elId);
   if (!el) { toast('❗ اعمل معاينة أولاً'); return; }
@@ -3934,10 +4155,14 @@ function downloadPrintPdf(elId, title) {
     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
     pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.month-title'] }
   };
-  html2pdf().set(opt).from(el).save().then(()=>{
+  let safe = null;
+  try { safe = pdfSafeClone(el); } catch (e) { safe = null; }
+  const src = safe ? safe.clone : el;
+  html2pdf().set(opt).from(src).save().then(()=>{
+    if (safe) safe.cleanup();
     savePrintHistory(title, el.innerHTML);
     toast('✅ تم تحميل الملف');
-  }).catch(()=>{ toast('❌ حدث خطأ أثناء إنشاء الملف'); });
+  }).catch(()=>{ if (safe) safe.cleanup(); toast('❌ حدث خطأ أثناء إنشاء الملف'); });
 }
 
 async function sharePrint(elId, title) {
@@ -4300,16 +4525,17 @@ function khazDocHeader(title, intro) {
 function khazDocTotals(gross, label) {
   const t = khaznaMoney(gross);
   return `<table class="quote-tbl" style="margin-top:12px;direction:rtl">
-    <tr><td style="text-align:right;font-weight:600">${label} (قبل الخصم)</td><td style="width:34%">${fmtMoney(t.gross)} جنيه</td></tr>
+    <tr><td style="text-align:right;font-weight:600">${label} — قبل الخصم</td><td style="width:34%">${fmtMoney(t.gross)} جنيه</td></tr>
     ${t.pct > 0 ? `<tr><td style="text-align:right">خصم ${t.pct}%</td><td>- ${fmtMoney(t.disc)} جنيه</td></tr>` : ''}
     <tr><td style="text-align:right;font-weight:700;background:#E3F2FD">الصافي المستحق</td><td style="font-weight:700;background:#E3F2FD">${fmtMoney(t.net)} جنيه</td></tr>
   </table>`;
 }
 function khazDocFooter() {
   const officer = state.settings.calOfficer || '';
+  const deputy = state.settings.qaDeputy || '';
   const companyName = state.settings.companyName || 'ARABCAPS';
   return `<p style="font-size:12px;margin-top:12px;text-align:center">وتفضلوا بقبول فائق التقدير والاحترام،،،</p>
-    <div style="margin-top:20px;font-size:12px"><div>مسؤول المعايرة</div>${officer ? `<div style="font-weight:600">${kEsc(officer)}</div>` : ''}<div style="color:#555">${kEsc(companyName)}</div></div>`;
+    ${sigBlock(officer, deputy, companyName)}`;
 }
 function buildKhaznaDoc(m) {
   const mo = khaznaData()[m - 1];
@@ -4326,7 +4552,7 @@ function buildKhaznaDoc(m) {
   const typeRows = Object.keys(mo.byType).map(k => { const b = mo.byType[k];
     return `<tr><td>${kEsc(b.name)}</td><td>${b.count}</td><td>${b.price === null ? '—' : fmtMoney(b.price)}</td><td>${fmtMoney(b.sum)}</td></tr>`; }).join('');
   return khazDocHeader(`بيان تكلفة معايرة أجهزة شهر ${MONTHS_AR[m]} ${cy}`,
-      `بيان بتكلفة معايرة الأجهزة التي وصلت شهاداتها (إجمالي ${mo.count} جهاز):`) +
+      `بيان بتكلفة معايرة الأجهزة التي وصلت شهاداتها بإجمالي ${mo.count} جهاز:`) +
     (mo.count ? `
     <table class="quote-tbl"><thead><tr><th>#</th><th>الجهاز</th><th>الموقع</th><th>الكود</th><th>السعر</th></tr></thead><tbody>${rows}</tbody></table>
     <div style="font-size:12px;font-weight:700;margin-top:12px">ملخص حسب النوع</div>
@@ -4342,7 +4568,7 @@ function buildKhaznaYearDoc() {
   const gross = months.reduce((s, x) => s + x.total, 0);
   const count = months.reduce((s, x) => s + x.count, 0);
   const rows = months.map(mo => `<tr><td>${MONTHS_AR[mo.m]}</td><td>${mo.count}</td><td>${fmtMoney(mo.total)}</td></tr>`).join('');
-  return khazDocHeader(`ملخص تكلفة المعايرة لسنة ${cy}`, `ملخص بتكلفة معايرة الأجهزة التي وصلت شهاداتها خلال العام (إجمالي ${count} جهاز):`) +
+  return khazDocHeader(`ملخص تكلفة المعايرة لسنة ${cy}`, `ملخص بتكلفة معايرة الأجهزة التي وصلت شهاداتها خلال العام بإجمالي ${count} جهاز:`) +
     `<table class="quote-tbl"><thead><tr><th>الشهر</th><th>عدد الأجهزة</th><th>المبلغ (جنيه)</th></tr></thead><tbody>${rows}</tbody></table>` +
     khazDocTotals(gross, 'إجمالي السنة') + khazDocFooter();
 }
@@ -4354,6 +4580,7 @@ function showKhazDoc(title, html) {
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
       <button class="btn btn-primary btn-sm" onclick="printKhazna()">🖨️ طباعة</button>
       <button class="btn btn-sm" onclick="pdfKhazna()">⬇️ تحميل PDF</button>
+      <button class="btn btn-sm" onclick="downloadPrintDocx('khazna-print', khCurrentTitle)">📝 تحميل Word</button>
       <button class="btn btn-sm" onclick="shareKhazna()">📤 مشاركة</button>
     </div>
     <div class="modal-footer"><button class="btn btn-block" onclick="closeModal()">إغلاق</button></div>`);
@@ -4376,7 +4603,7 @@ init();
 // ===================== LANGUAGE (AR / EN) =====================
 // Translates only the interface. Device data (names, sections, locations, codes) is never touched.
 (function () {
-  const EN = {"؟ الأجهزة اللي فيه هتبقى من غير نوع لحد ما تختارلها نوع تاني": "? Its devices will have no type until you pick another type for them", "؟ سيتم ترحيل بيانات": "? Data will be migrated", "أبريل": "April", "أبقيه هنا": "Keep here", "أجهزة من غير نوع": "Devices without a type", "أدخل كلمة السر": "Enter password", "أدخل كلمة السر الجديدة": "Enter the new password", "أدمن": "Admin", "أرشيف": "Archive", "أرشيف سنة": "Archive of year", "أعد الكتابة": "Re-type", "أغسطس": "August", "أكتوبر": "October", "أو": "or", "أي جهاز اسمه فيه واحدة من الكلمات دي بيدخل النوع ده (بالإنجليزي)، زي": "Any device whose name contains one of these words is assigned to this type (in English), e.g.", "أي ملاحظات": "Any notes", "إجمالي": "Total", "إجمالي الأجهزة": "Total devices", "إجمالي السنة": "Year total", "إجمالي الشهر": "Month total", "إرجاع الأجهزة لشهورها الأصلية": "Restore devices to their original months", "إرسال عرض سعر معايرة": "Send a calibration price quote", "إضافة": "Add", "إضافة جهاز": "Add device", "إضافة جهاز جديد": "Add new device", "إضافة سنة": "Add year", "إضافة سنة جديدة": "Add new year", "إعادة تهيئة البيانات": "Reset data", "إعدادات": "Settings", "إغلاق": "Close", "إلغاء": "Cancel", "إلغاء التحديد": "Deselect", "إلغاء الكل": "Deselect all", "إلى": "to", "إلى الأرشيف": "To archive", "إلى شهر": "To month", "اتحذف": "Deleted", "اتركه فارغاً إذا غير موجود": "Leave empty if not available", "اختار نوع لكل جهاز، أو ضيف كلمة من اسمه في نوع موجود (من": "Pick a type for each device, or add a word from its name to an existing type (from", "اختر": "Select", "اختر النوع": "Select type", "اختر ملف": "Choose file", "اختر ملف أولاً": "Choose a file first", "اختيار صورة": "Choose photo", "اختياري": "optional", "استبدال كل الأجهزة": "Replace all devices", "استعادة": "Restore", "اسم الجهاز": "Device name", "اسم الشركة": "Company name", "اسم القسم الجديد": "New section name", "اسم النوع": "Type name", "اسم شركة المعايرة": "Calibration company name", "اسم مسؤول المعايرة": "Calibration officer name", "اضغط على الإطار لإضافة صورة — يمكن إضافة حتى 4 صور": "Tap the frame to add a photo — up to 4 photos", "اعرض كل الأجهزة المتشابهة واختار الشهر اللي تفضل فيه": "Show all similar devices and choose the month to keep them in", "اعمل معاينة أولاً": "Preview first", "اكتب اسم النوع": "Enter the type name", "الأجهزة المتكررة في أكتر من شهر": "Devices repeated in more than one month", "الأجهزة المعطلة": "Faulty devices", "الأجهزة غير المنفذة في": "Devices not executed in", "الأدمن هيجهزها": "The admin will set them up", "الأرشيف": "Archive", "الأشهر": "Months", "الإبقاء على": "Keeping", "الإجمالي": "Total", "الإجمالي قبل الخصم": "Total before discount", "الإصدار": "Version", "الإعدادات": "Settings", "الاتصال بقاعدة البيانات": "Database connection", "الاسم والقسم مطلوبان": "Name and section are required", "الانتقال لسنة": "Go to year", "التاريخ": "Date", "التعليمة": "Instruction", "التعليمة الكاملة": "Full instruction", "التعليمة — خطة المعايرة": "Instruction — calibration plan", "التقدم حسب القسم": "Progress by section", "التنفيذ": "Execution", "الجدول": "Schedule", "الجهاز": "Device", "الجهاز بيتحسب لما تدوس زرار": "The device is counted when you press", "الجهاز ده موجود في": "This device exists in", "الحالة": "Status", "الخزنة": "Treasury", "الخزنة وتكلفة المعايرة": "Treasury & calibration cost", "الخزنة — تكلفة المعايرة": "Treasury — calibration cost", "الرئيسية": "Home", "الرقم التسلسلي / السيريال نمبر": "Serial number", "إن وُجد": "if any", "السادة": "Dear Sirs", "السعر": "Price", "الشهادة وصلت": "Certificate received", "الشهر": "Month", "الشهر الأصلي": "Original month", "الشهر المصدر والهدف متشابهان": "Source and target months are the same", "الشهر المطلوب": "Requested month", "الصافي المستحق": "Net amount due", "العدد": "Count", "القسم": "Section", "الكل": "All", "الكود": "Code", "المبلغ": "Amount", "جنيه": "EGP", "المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة": "The browser blocked the print window — allow pop-ups", "المتكرر": "Duplicates", "المشاركة غير مدعومة على هذا الجهاز — استخدم تحميل": "Sharing is not supported on this device — use Download", "المهندس أحمد عادل": "Eng. Ahmed Adel", "الموقع": "Location", "النسخة دي منفّذة": "This copy is executed", "النوع": "Type", "بتتخصم من إجمالي كل الشهور، وبتظهر في الملفات المطبوعة": "Deducted from the total of all months and shown in printed files", "بحث": "Search", "بحث باسم الجهاز أو الكود أو الموقع": "Search by device name, code or location", "بدلاً منها": "instead", "بدون سعر": "No price", "بدون نوع": "No type", "بعد الخصم": "After discount", "بيان بتكلفة معايرة الأجهزة التي وصلت شهاداتها (إجمالي": "Statement of calibration cost for devices whose certificates arrived (total", "بيان تكلفة معايرة": "Calibration cost statement", "بيان تكلفة معايرة أجهزة شهر": "Calibration cost statement for devices of month", "بيانات الشركة": "Company details", "بيحذف النسخة دي بس": "deletes this copy only", "بيحذف باقي نسخ الجهاز من الشهور التانية": "deletes the other copies of the device from the other months", "تأكد من الاتصال بالإنترنت": "Check your internet connection", "تأكيد": "Confirm", "تأكيد استبدال كل الأجهزة الحالية بـ": "Confirm replacing all current devices with", "تأكيد الاستبدال": "Confirm replacement", "تأكيد الصلاحية": "Confirm permission", "تأكيد كلمة السر": "Confirm password", "تأكيد مرة أخرى — سيتم حذف كل شيء؟": "Confirm again — everything will be deleted?", "تأكيد وضع": "Confirm marking", "تاريخ التنفيذ": "Execution date", "تاريخ التنفيذ للمحدد": "Execution date for selected", "تبديل المحدد": "Toggle selected", "تبديل وضع المدير": "Toggle manager mode", "تجهيز أنواع الأجهزة": "Set up device types", "تجهيز الأنواع": "Set up types", "تحديث مجموعة أجهزة": "Update a group of devices", "تحديد الكل": "Select all", "تحذير: هذا الإجراء سيحذف كل الأجهزة الحالية ويستبدلها بالملف الجديد. الأرشيف والمعطلات لن يتأثروا": "Warning: this will delete all current devices and replace them with the new file. Archive and faulty devices are not affected", "تحميل": "Download", "تحية طيبة وبعد،،،": "Greetings,", "ترحيل": "Transfer", "ترحيل الأجهزة بين الشهور": "Transfer devices between months", "ترحيل المحدد": "Transfer selected", "تسجيل الخروج": "Log out", "تسجيل الدخول بالبريد مش مفعّل في": "Email sign-in is not enabled in", "تطبيق": "Apply", "تعديل الجهاز": "Edit device", "تعديل النوع": "Edit type", "تعذر تحميل أداة": "Could not load the tool", "تعذّر الاتصال — هتشوف آخر نسخة محفوظة على الجهاز": "Connection failed — you will see the last copy saved on this device", "تعذّر تسجيل الدخول": "Sign-in failed", "تغيير": "Change", "تغيير كلمة سر الإعدادات": "Change settings password", "تغيير كلمة سر الدخول": "Change login password", "تغيير كلمة سر الدخول الرئيسية يحتاج كلمة سر إضافية للتأكيد": "Changing the main login password needs an extra password to confirm", "تلقائي (من اسم الجهاز)": "Automatic (from device name)", "تلقائياً": "automatically", "تم": "Done", "تم إرجاع": "Restored", "تم إضافة الجهاز": "Device added", "تم إضافة الصورة": "Photo added", "تم إضافة سنة": "Year added", "تم إلغاء تسجيل الشهادة": "Certificate registration cancelled", "تم اختيار الشعار وتحديثه في الواجهة": "Logo selected and updated in the interface", "تم استبدال التعليمة بنجاح": "Instruction replaced successfully", "تم استعادة الجهاز": "Device restored", "تم التحديث": "Updated", "تم التنفيذ": "Executed", "تم الحذف": "Deleted", "تم الحفظ": "Saved", "تم الحفظ وتحديث": "Saved and updated", "تم الخروج من وضع المدير": "Left manager mode", "تم تجهيز الأنواع": "Types set up", "تم تحميل الملف": "File downloaded", "تم ترحيل": "Transferred", "تم تسجيل وصول الشهادة": "Certificate arrival recorded", "تم تغيير كلمة السر": "Password changed", "تم تنفيذه": "Executed", "تم حذف أرشيف": "Archive deleted", "تم حذف الجهاز": "Device deleted", "تم حذف السنة من الأرشيف": "Year deleted from archive", "تم حذف الشهر من الأرشيف": "Month deleted from archive", "تم حذف النوع": "Type deleted", "تم حفظ بيانات الشركة": "Company details saved", "تم فتح خيارات المشاركة": "Share options opened", "تم قراءة": "Read", "تم مسح السجل": "History cleared", "تم وضع الجهاز كمعطل": "Device marked as faulty", "تنفيذ أجهزة": "Execute devices", "تنفيذ الشهر كله": "Execute the whole month", "جاري الاتصال": "Connecting", "جاري التحقق": "Verifying", "جاري تجهيز الملف": "Preparing the file", "جميع الحقوق محفوظة": "All rights reserved", "جنب النوع) وكل الأجهزة اللي زيه هتتصنف مرة واحدة": "next to the type) and all similar devices are classified at once", "جهاز": "device", "جهاز آخر": "another device", "جهاز إلى": "devices to", "جهاز بدون سعر ولم يدخل في الإجمالي": "device without a price, not included in the total", "جهاز جديد؟": "new device?", "جهاز كمان": "more devices", "جهاز لشهورهم الأصلية": "devices to their original months", "جهاز مسجّل": "registered devices", "جهاز معطل": "faulty devices", "جهاز من": "devices from", "جهاز نُفِّذ": "devices executed", "جهاز وصلت شهادته بس مالوش سعر، ومش داخل في الإجمالي": "device whose certificate arrived but has no price, not included in the total", "حدث خطأ أثناء إنشاء الملف": "An error occurred while creating the file", "حذف": "Delete", "حذف أرشيف": "Delete archive", "حذف أرشيف سنة": "Delete year archive", "حذف الجهاز": "Delete device", "حذف السنة": "Delete year", "حذف الشهر": "Delete month", "حذف النوع": "Delete type", "حذف جهاز": "Delete device", "حذف جهاز معطل": "Delete faulty device", "حذف كل أرشيف سنة": "Delete the whole archive of year", "حذف كل البيانات والبدء من الأول": "Delete all data and start over", "حذف كل البيانات والبدء من الأول؟": "Delete all data and start over?", "حذف مجموعة أجهزة": "Delete a group of devices", "حذف نهائي؟": "Delete permanently?", "حذف نوع": "Delete type", "حذف هذا الجهاز نهائياً؟": "Delete this device permanently?", "حفظ": "Save", "خارج الخدمة": "Out of service", "خروج": "Exit", "خصم": "Discount", "خطأ غير معروف": "Unknown error", "خطأ في قراءة الملف — تأكد أن التنسيق صحيح": "Error reading the file — make sure the format is correct", "دخول": "Login", "دخول — أدمن": "Login — Admin", "ديسمبر": "December", "رفع تعديلات معلقة": "Upload pending changes", "رفع تعليمة جديدة": "Upload a new instruction", "رقم التسلسل": "Serial number", "سبتمبر": "September", "سجل الطباعة": "Print history", "سجل المطبوعات": "Print history", "سجل تاني": "other records", "سجل تاني (شهور تانية). تطبّق نفس التعديل (الاسم/الكود/الموقع/القسم) عليهم؟": "other records (other months). Apply the same edit (name/code/location/section) to them?", "سعر الوحدة": "Unit price", "سعر معايرة الجهاز الواحد حسب النوع": "Calibration price per device by type", "سعر نوع": "Price of type", "سنة": "Year", "سنة جديدة": "New year", "شركة المعايرة": "Calibration company", "شعار الشركة": "Company logo", "شهادات المعايرة": "Calibration certificates", "شهادة": "Certificate", "شهور": "months", "صور": "Photos", "صورة": "Photo", "صورة الجهاز": "Device photo", "طباعة": "Print", "طباعة الصفحة الحالية": "Print current page", "طلب شهادات": "Certificates request", "طلب شهادات لم تأتِ بعد": "Request outstanding certificates", "طلب عرض سعر": "Quote request", "عدد الأجهزة": "Number of devices", "عرض المدير": "Manager view", "عرض سعر": "Price quote", "عرض سعر معايرة": "Calibration price quote", "عرض فقط": "View only", "عرض كل الأجهزة مرتبة": "Show all devices in order", "عليه، وسعره بيتحط في شهر الجهاز في التعليمة": "on it, and its price is placed in the device's month in the instruction", "غير المنفذ": "Not executed", "غير متصل — يعمل محلياً": "Offline — working locally", "غير مصرح بفتح هذا البرنامج من هذا الموقع": "This program is not allowed to open from this site", "فبراير": "February", "فشل تغيير كلمة السر": "Failed to change the password", "فشل حفظ التغيير على السيرفر": "Failed to save the change on the server", "فقط وحذف": "only and deleting", "في": "in", "في هذا الشهر": "in this month", "فيهم": "of which", "قادم": "Upcoming", "قبل الخصم": "before discount", "قسم جديد": "New section", "كشف المتكرر": "Duplicate finder", "كل الأجهزة في شهورها الأصلية بالفعل": "All devices are already in their original months", "كل الأقسام": "All sections", "كل الحالات": "All statuses", "كل الشهور": "All months", "كل شهادات الأجهزة المنفذة وصلت": "All certificates of executed devices have arrived", "كلمات من اسم الجهاز بتحدد النوع ده (مفصولة بفاصلة)": "Words from the device name that identify this type (comma-separated)", "كلمة السر الجديدة": "New password", "كلمة السر غلط": "Wrong password", "كلمة السر غلط — أو أول دخول على الجهاز ده لازم يكون بالإنترنت": "Wrong password — or the first login on this device must be online", "كلمة السر قصيرة جداً (3 أحرف على الأقل)": "Password too short (at least 3 characters)", "كلمة السر لازم تكون 6 خانات أو أكتر": "Password must be at least 6 characters", "كلمة سر الأدمن": "Admin password", "كلمة سر الأدمن الرئيسية": "Main admin password", "كلمة سر الأدمن لازم تكون 6 خانات أو أكتر": "Admin password must be at least 6 characters", "كلمة سر الإعدادات": "Settings password", "كلمة سر الدخول الرئيسية": "Main login password", "كلمة سر الدخول للإعدادات": "Settings login password", "كلمة سر المدير": "Manager password", "كلمتا السر غير متطابقتين": "Passwords do not match", "كمعطل؟": "as faulty?", "لا توجد أجهزة تم تنفيذ معايرتها بعد": "No devices have been calibrated yet", "لا توجد أجهزة غير منفذة في هذا الشهر": "No unexecuted devices in this month", "لا توجد أجهزة في": "No devices in", "لا توجد أجهزة مطابقة للفلتر": "No devices match the filter", "لا توجد أجهزة معطلة": "No faulty devices", "لا توجد شهادات مسجلة لهذا الشهر": "No certificates recorded for this month", "لا توجد نتائج": "No results", "لا يوجد أرشيف بعد": "No archive yet", "لا يوجد سجل مطبوعات بعد": "No print history yet", "لا يوجد شيء لطلب شهادته": "Nothing to request a certificate for", "لازم تكون متصل بالإنترنت وداخل كأدمن": "You must be online and signed in as admin", "لازم تكون متصل بالإنترنت وداخل كأدمن عشان التغيير ده يوصل للكل": "You must be online and signed in as admin for this change to reach everyone", "لسه أنواع الأجهزة مش متجهزة": "Device types are not set up yet", "للتعديل: اخرج وادخل بكلمة السر": "To edit: exit and log in with the password", "للتعليمة؟": "to the instruction?", "لم تحدد أي جهاز": "No device selected", "لم يتم": "Not yet", "لم يتم العثور على بيانات صحيحة في الملف": "No valid data found in the file", "لم يتم بعد": "Not yet", "لهذا الشهر": "for this month", "مارس": "March", "مايو": "May", "متأخر": "Late", "متبقي": "Remaining", "متصل ومتزامن": "Online & synced", "مثال": "Example", "مثال: أحمد عادل": "Example: Ahmed Adel", "مثال: شركة التقنية للمعايرة": "Example: Technology Calibration Co.", "محاولات غلط كتير — استنى شوية وجرب تاني": "Too many wrong attempts — wait a bit and try again", "مسؤول المعايرة": "Calibration officer", "مستحق": "Due", "مستحق الشهر": "Due this month", "مسح البيانات الحالية واستبدالها بملف جديد": "Clear current data and replace it with a new file", "مسح السجل": "Clear history", "مسح سجل الطباعة": "Clear print history", "مسح كل سجل المطبوعات؟": "Clear the whole print history?", "مشاركة": "Share", "معاينة": "Preview", "معطل": "Faulty", "معطلة": "Faulty", "مفيش أجهزة مكررة في أكتر من شهر": "No devices repeated in more than one month", "مفيش حاجة هتتحذف، والأسماء والأكواد والصور زي ما هي": "Nothing will be deleted; names, codes and photos stay as they are", "مكتمل": "Completed", "ملاحظات": "Notes", "ملحوظة": "Note", "ملخص السنة": "Year summary", "ملخص بتكلفة معايرة الأجهزة التي وصلت شهاداتها خلال العام (إجمالي": "Summary of calibration cost for devices whose certificates arrived during the year (total", "ملخص تكلفة المعايرة": "Calibration cost summary", "ملخص تكلفة المعايرة لسنة": "Calibration cost summary for year", "ملخص حسب النوع": "Summary by type", "من": "from", "من شهر": "From month", "موجود في": "exists in", "نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن (إجمالي": "Kindly send the remaining certificates for the following devices, which were calibrated but whose certificates have not arrived yet (total", "نرجو من سيادتكم إرسال عرض سعر لمعايرة أجهزة شهر": "Kindly send a price quote for the calibration of the devices of month", "نسبة الخصم على إجمالي المبلغ المستحق": "Discount percentage on the total amount due", "نسخة": "Copy", "نسخة من": "Copy of", "نسخة من كل عرض سعر أو طلب شهادات أو تعليمة تم طباعتها أو تحميلها أو مشاركتها": "A copy of every price quote, certificate request or instruction that was printed, downloaded or shared", "نسخة منفّذة (تاريخ تنفيذ) هتتحذف": "executed copy (with execution date) will be deleted", "نظام إدارة المعايرة": "Calibration Management System", "نكمّل؟": "Continue?", "نهائياً؟": "permanently?", "نوع": "type", "نوع الجهاز (لحساب سعر المعايرة)": "Device type (to calculate calibration price)", "نوع جديد": "New type", "نوفمبر": "November", "هذا الإجراء لا يمكن التراجع عنه": "This action cannot be undone", "هذا الحقل مخصص للربط بقاعدة بيانات مشتركة مستقبلاً — اتركه فارغاً إذا كنت تستخدم التخزين المحلي فقط": "This field is reserved for connecting to a shared database in the future — leave it empty if you only use local storage", "هذه الأجهزة تم إزالتها من التعليمة الرئيسية": "These devices were removed from the main instruction", "هيتم إرجاع": "Will be restored:", "و": "and", "وتفضلوا بقبول فائق التقدير والاحترام،،،": "Yours faithfully,", "وضع العرض للمدير — قراءة فقط": "Manager view — read only", "وضع العرض للمدير — للقراءة فقط": "Manager view — read only", "وضع المدير — قراءة فقط": "Manager mode — read only", "يجب أن يحتوي الملف على 5 أعمدة بالترتيب: القسم — الجهاز — الموقع — الشهر (رقم 1-12) — الكود": "The file must contain 5 columns in this order: Section — Device — Location — Month (number 1-12) — Code", "يحتاج متابعة": "Needs follow-up", "يحتفظ النظام بسنة واحدة سابقة فقط": "The system keeps only one previous year", "يلغي كل الترحيلات ويرجّع كل جهاز لشهره الأصلي (من غير حذف أي بيانات)": "Cancels all transfers and puts every device back in its original month (nothing is deleted)", "يناير": "January", "يوليو": "July", "يونيو": "June", "إجمالي الأجهزة المنفذة": "Executed devices total", "الأجهزة": "Devices", "الأجهزة المنفذة": "Executed devices", "المعطلة": "Faulty", "هذا الجهاز": "this device", "تنفيذ": "Execute", "تعديل": "Edit", "إضافة نوع": "Add type", "الأنواع": "Types", "ضيف": "Add", "اخرج": "Exit", "سجل": "Record", "مصدر": "Source", "هدف": "Target", "عرض الكل": "Show all", "البحث واللغات": "Search & languages", "اللغة": "Language", "عرض أول": "Showing first"};
+  const EN = {"؟ الأجهزة اللي فيه هتبقى من غير نوع لحد ما تختارلها نوع تاني": "? Its devices will have no type until you pick another type for them", "؟ سيتم ترحيل بيانات": "? Data will be migrated", "أبريل": "April", "أبقيه هنا": "Keep here", "أجهزة من غير نوع": "Devices without a type", "أدخل كلمة السر": "Enter password", "أدخل كلمة السر الجديدة": "Enter the new password", "أدمن": "Admin", "أرشيف": "Archive", "أرشيف سنة": "Archive of year", "أعد الكتابة": "Re-type", "أغسطس": "August", "أكتوبر": "October", "أو": "or", "أي جهاز اسمه فيه واحدة من الكلمات دي بيدخل النوع ده (بالإنجليزي)، زي": "Any device whose name contains one of these words is assigned to this type (in English), e.g.", "أي ملاحظات": "Any notes", "إجمالي": "Total", "إجمالي الأجهزة": "Total devices", "إجمالي السنة": "Year total", "إجمالي الشهر": "Month total", "إرجاع الأجهزة لشهورها الأصلية": "Restore devices to their original months", "إرسال عرض سعر معايرة": "Send a calibration price quote", "إضافة": "Add", "إضافة جهاز": "Add device", "إضافة جهاز جديد": "Add new device", "إضافة سنة": "Add year", "إضافة سنة جديدة": "Add new year", "إعادة تهيئة البيانات": "Reset data", "إعدادات": "Settings", "إغلاق": "Close", "إلغاء": "Cancel", "إلغاء التحديد": "Deselect", "إلغاء الكل": "Deselect all", "إلى": "to", "إلى الأرشيف": "To archive", "إلى شهر": "To month", "اتحذف": "Deleted", "اتركه فارغاً إذا غير موجود": "Leave empty if not available", "اختار نوع لكل جهاز، أو ضيف كلمة من اسمه في نوع موجود (من": "Pick a type for each device, or add a word from its name to an existing type (from", "اختر": "Select", "اختر النوع": "Select type", "اختر ملف": "Choose file", "اختر ملف أولاً": "Choose a file first", "اختيار صورة": "Choose photo", "اختياري": "optional", "استبدال كل الأجهزة": "Replace all devices", "استعادة": "Restore", "اسم الجهاز": "Device name", "اسم الشركة": "Company name", "اسم القسم الجديد": "New section name", "اسم النوع": "Type name", "اسم شركة المعايرة": "Calibration company name", "اسم مسؤول المعايرة": "Calibration officer name", "اضغط على الإطار لإضافة صورة — يمكن إضافة حتى 4 صور": "Tap the frame to add a photo — up to 4 photos", "اعرض كل الأجهزة المتشابهة واختار الشهر اللي تفضل فيه": "Show all similar devices and choose the month to keep them in", "اعمل معاينة أولاً": "Preview first", "اكتب اسم النوع": "Enter the type name", "الأجهزة المتكررة في أكتر من شهر": "Devices repeated in more than one month", "الأجهزة المعطلة": "Faulty devices", "الأجهزة غير المنفذة في": "Devices not executed in", "الأدمن هيجهزها": "The admin will set them up", "الأرشيف": "Archive", "الأشهر": "Months", "الإبقاء على": "Keeping", "الإجمالي": "Total", "الإجمالي قبل الخصم": "Total before discount", "الإصدار": "Version", "الإعدادات": "Settings", "الاتصال بقاعدة البيانات": "Database connection", "الاسم والقسم مطلوبان": "Name and section are required", "الانتقال لسنة": "Go to year", "التاريخ": "Date", "التعليمة": "Instruction", "التعليمة الكاملة": "Full instruction", "التعليمة — خطة المعايرة": "Instruction — calibration plan", "التقدم حسب القسم": "Progress by section", "التنفيذ": "Execution", "الجدول": "Schedule", "الجهاز": "Device", "الجهاز بيتحسب لما تدوس زرار": "The device is counted when you press", "الجهاز ده موجود في": "This device exists in", "الحالة": "Status", "الخزنة": "Treasury", "الخزنة وتكلفة المعايرة": "Treasury & calibration cost", "الخزنة — تكلفة المعايرة": "Treasury — calibration cost", "الرئيسية": "Home", "الرقم التسلسلي / السيريال نمبر": "Serial number", "إن وُجد": "if any", "السادة": "Dear Sirs", "السعر": "Price", "الشهادة وصلت": "Certificate received", "الشهر": "Month", "الشهر الأصلي": "Original month", "الشهر المصدر والهدف متشابهان": "Source and target months are the same", "الشهر المطلوب": "Requested month", "الصافي المستحق": "Net amount due", "العدد": "Count", "القسم": "Section", "الكل": "All", "الكود": "Code", "المبلغ": "Amount", "جنيه": "EGP", "المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة": "The browser blocked the print window — allow pop-ups", "المتكرر": "Duplicates", "المشاركة غير مدعومة على هذا الجهاز — استخدم تحميل": "Sharing is not supported on this device — use Download", "المهندس أحمد عادل": "Eng. Ahmed Adel", "الموقع": "Location", "النسخة دي منفّذة": "This copy is executed", "النوع": "Type", "بتتخصم من إجمالي كل الشهور، وبتظهر في الملفات المطبوعة": "Deducted from the total of all months and shown in printed files", "بحث": "Search", "بحث باسم الجهاز أو الكود أو الموقع": "Search by device name, code or location", "بدلاً منها": "instead", "بدون سعر": "No price", "بدون نوع": "No type", "بعد الخصم": "After discount", "بيان بتكلفة معايرة الأجهزة التي وصلت شهاداتها (إجمالي": "Statement of calibration cost for devices whose certificates arrived (total", "بيان تكلفة معايرة": "Calibration cost statement", "بيان تكلفة معايرة أجهزة شهر": "Calibration cost statement for devices of month", "بيانات الشركة": "Company details", "بيحذف النسخة دي بس": "deletes this copy only", "بيحذف باقي نسخ الجهاز من الشهور التانية": "deletes the other copies of the device from the other months", "تأكد من الاتصال بالإنترنت": "Check your internet connection", "تأكيد": "Confirm", "تأكيد استبدال كل الأجهزة الحالية بـ": "Confirm replacing all current devices with", "تأكيد الاستبدال": "Confirm replacement", "تأكيد الصلاحية": "Confirm permission", "تأكيد كلمة السر": "Confirm password", "تأكيد مرة أخرى — سيتم حذف كل شيء؟": "Confirm again — everything will be deleted?", "تأكيد وضع": "Confirm marking", "تاريخ التنفيذ": "Execution date", "تاريخ التنفيذ للمحدد": "Execution date for selected", "تبديل المحدد": "Toggle selected", "تبديل وضع المدير": "Toggle manager mode", "تجهيز أنواع الأجهزة": "Set up device types", "تجهيز الأنواع": "Set up types", "تحديث مجموعة أجهزة": "Update a group of devices", "تحديد الكل": "Select all", "تحذير: هذا الإجراء سيحذف كل الأجهزة الحالية ويستبدلها بالملف الجديد. الأرشيف والمعطلات لن يتأثروا": "Warning: this will delete all current devices and replace them with the new file. Archive and faulty devices are not affected", "تحميل": "Download", "تحية طيبة وبعد،،،": "Greetings,", "ترحيل": "Transfer", "ترحيل الأجهزة بين الشهور": "Transfer devices between months", "ترحيل المحدد": "Transfer selected", "تسجيل الخروج": "Log out", "تسجيل الدخول بالبريد مش مفعّل في": "Email sign-in is not enabled in", "تطبيق": "Apply", "تعديل الجهاز": "Edit device", "تعديل النوع": "Edit type", "تعذر تحميل أداة": "Could not load the tool", "تعذّر الاتصال — هتشوف آخر نسخة محفوظة على الجهاز": "Connection failed — you will see the last copy saved on this device", "تعذّر تسجيل الدخول": "Sign-in failed", "تغيير": "Change", "تغيير كلمة سر الإعدادات": "Change settings password", "تغيير كلمة سر الدخول": "Change login password", "تغيير كلمة سر الدخول الرئيسية يحتاج كلمة سر إضافية للتأكيد": "Changing the main login password needs an extra password to confirm", "تلقائي (من اسم الجهاز)": "Automatic (from device name)", "تلقائياً": "automatically", "تم": "Done", "تم إرجاع": "Restored", "تم إضافة الجهاز": "Device added", "تم إضافة الصورة": "Photo added", "تم إضافة سنة": "Year added", "تم إلغاء تسجيل الشهادة": "Certificate registration cancelled", "تم اختيار الشعار وتحديثه في الواجهة": "Logo selected and updated in the interface", "تم استبدال التعليمة بنجاح": "Instruction replaced successfully", "تم استعادة الجهاز": "Device restored", "تم التحديث": "Updated", "تم التنفيذ": "Executed", "تم الحذف": "Deleted", "تم الحفظ": "Saved", "تم الحفظ وتحديث": "Saved and updated", "تم الخروج من وضع المدير": "Left manager mode", "تم تجهيز الأنواع": "Types set up", "تم تحميل الملف": "File downloaded", "تم ترحيل": "Transferred", "تم تسجيل وصول الشهادة": "Certificate arrival recorded", "تم تغيير كلمة السر": "Password changed", "تم تنفيذه": "Executed", "تم حذف أرشيف": "Archive deleted", "تم حذف الجهاز": "Device deleted", "تم حذف السنة من الأرشيف": "Year deleted from archive", "تم حذف الشهر من الأرشيف": "Month deleted from archive", "تم حذف النوع": "Type deleted", "تم حفظ بيانات الشركة": "Company details saved", "تم فتح خيارات المشاركة": "Share options opened", "تم قراءة": "Read", "تم مسح السجل": "History cleared", "تم وضع الجهاز كمعطل": "Device marked as faulty", "تنفيذ أجهزة": "Execute devices", "تنفيذ الشهر كله": "Execute the whole month", "جاري الاتصال": "Connecting", "جاري التحقق": "Verifying", "جاري تجهيز الملف": "Preparing the file", "جميع الحقوق محفوظة": "All rights reserved", "جنب النوع) وكل الأجهزة اللي زيه هتتصنف مرة واحدة": "next to the type) and all similar devices are classified at once", "جهاز": "device", "جهاز آخر": "another device", "جهاز إلى": "devices to", "جهاز بدون سعر ولم يدخل في الإجمالي": "device without a price, not included in the total", "جهاز جديد؟": "new device?", "جهاز كمان": "more devices", "جهاز لشهورهم الأصلية": "devices to their original months", "جهاز مسجّل": "registered devices", "جهاز معطل": "faulty devices", "جهاز من": "devices from", "جهاز نُفِّذ": "devices executed", "جهاز وصلت شهادته بس مالوش سعر، ومش داخل في الإجمالي": "device whose certificate arrived but has no price, not included in the total", "حدث خطأ أثناء إنشاء الملف": "An error occurred while creating the file", "حذف": "Delete", "حذف أرشيف": "Delete archive", "حذف أرشيف سنة": "Delete year archive", "حذف الجهاز": "Delete device", "حذف السنة": "Delete year", "حذف الشهر": "Delete month", "حذف النوع": "Delete type", "حذف جهاز": "Delete device", "حذف جهاز معطل": "Delete faulty device", "حذف كل أرشيف سنة": "Delete the whole archive of year", "حذف كل البيانات والبدء من الأول": "Delete all data and start over", "حذف كل البيانات والبدء من الأول؟": "Delete all data and start over?", "حذف مجموعة أجهزة": "Delete a group of devices", "حذف نهائي؟": "Delete permanently?", "حذف نوع": "Delete type", "حذف هذا الجهاز نهائياً؟": "Delete this device permanently?", "حفظ": "Save", "خارج الخدمة": "Out of service", "خروج": "Exit", "خصم": "Discount", "خطأ غير معروف": "Unknown error", "خطأ في قراءة الملف — تأكد أن التنسيق صحيح": "Error reading the file — make sure the format is correct", "دخول": "Login", "دخول — أدمن": "Login — Admin", "ديسمبر": "December", "رفع تعديلات معلقة": "Upload pending changes", "رفع تعليمة جديدة": "Upload a new instruction", "رقم التسلسل": "Serial number", "سبتمبر": "September", "سجل الطباعة": "Print history", "سجل المطبوعات": "Print history", "سجل تاني": "other records", "سجل تاني (شهور تانية). تطبّق نفس التعديل (الاسم/الكود/الموقع/القسم) عليهم؟": "other records (other months). Apply the same edit (name/code/location/section) to them?", "سعر الوحدة": "Unit price", "سعر معايرة الجهاز الواحد حسب النوع": "Calibration price per device by type", "سعر نوع": "Price of type", "سنة": "Year", "سنة جديدة": "New year", "شركة المعايرة": "Calibration company", "شعار الشركة": "Company logo", "شهادات المعايرة": "Calibration certificates", "شهادة": "Certificate", "شهور": "months", "صور": "Photos", "صورة": "Photo", "صورة الجهاز": "Device photo", "طباعة": "Print", "طباعة الصفحة الحالية": "Print current page", "طلب شهادات": "Certificates request", "طلب شهادات لم تأتِ بعد": "Request outstanding certificates", "طلب عرض سعر": "Quote request", "عدد الأجهزة": "Number of devices", "عرض المدير": "Manager view", "عرض سعر": "Price quote", "عرض سعر معايرة": "Calibration price quote", "عرض فقط": "View only", "عرض كل الأجهزة مرتبة": "Show all devices in order", "عليه، وسعره بيتحط في شهر الجهاز في التعليمة": "on it, and its price is placed in the device's month in the instruction", "غير المنفذ": "Not executed", "غير متصل — يعمل محلياً": "Offline — working locally", "غير مصرح بفتح هذا البرنامج من هذا الموقع": "This program is not allowed to open from this site", "فبراير": "February", "فشل تغيير كلمة السر": "Failed to change the password", "فشل حفظ التغيير على السيرفر": "Failed to save the change on the server", "فقط وحذف": "only and deleting", "في": "in", "في هذا الشهر": "in this month", "فيهم": "of which", "قادم": "Upcoming", "قبل الخصم": "before discount", "قسم جديد": "New section", "كشف المتكرر": "Duplicate finder", "كل الأجهزة في شهورها الأصلية بالفعل": "All devices are already in their original months", "كل الأقسام": "All sections", "كل الحالات": "All statuses", "كل الشهور": "All months", "كل شهادات الأجهزة المنفذة وصلت": "All certificates of executed devices have arrived", "كلمات من اسم الجهاز بتحدد النوع ده (مفصولة بفاصلة)": "Words from the device name that identify this type (comma-separated)", "كلمة السر الجديدة": "New password", "كلمة السر غلط": "Wrong password", "كلمة السر غلط — أو أول دخول على الجهاز ده لازم يكون بالإنترنت": "Wrong password — or the first login on this device must be online", "كلمة السر قصيرة جداً (3 أحرف على الأقل)": "Password too short (at least 3 characters)", "كلمة السر لازم تكون 6 خانات أو أكتر": "Password must be at least 6 characters", "كلمة سر الأدمن": "Admin password", "كلمة سر الأدمن الرئيسية": "Main admin password", "كلمة سر الأدمن لازم تكون 6 خانات أو أكتر": "Admin password must be at least 6 characters", "كلمة سر الإعدادات": "Settings password", "كلمة سر الدخول الرئيسية": "Main login password", "كلمة سر الدخول للإعدادات": "Settings login password", "كلمة سر المدير": "Manager password", "كلمتا السر غير متطابقتين": "Passwords do not match", "كمعطل؟": "as faulty?", "لا توجد أجهزة تم تنفيذ معايرتها بعد": "No devices have been calibrated yet", "لا توجد أجهزة غير منفذة في هذا الشهر": "No unexecuted devices in this month", "لا توجد أجهزة في": "No devices in", "لا توجد أجهزة مطابقة للفلتر": "No devices match the filter", "لا توجد أجهزة معطلة": "No faulty devices", "لا توجد شهادات مسجلة لهذا الشهر": "No certificates recorded for this month", "لا توجد نتائج": "No results", "لا يوجد أرشيف بعد": "No archive yet", "لا يوجد سجل مطبوعات بعد": "No print history yet", "لا يوجد شيء لطلب شهادته": "Nothing to request a certificate for", "لازم تكون متصل بالإنترنت وداخل كأدمن": "You must be online and signed in as admin", "لازم تكون متصل بالإنترنت وداخل كأدمن عشان التغيير ده يوصل للكل": "You must be online and signed in as admin for this change to reach everyone", "لسه أنواع الأجهزة مش متجهزة": "Device types are not set up yet", "للتعديل: اخرج وادخل بكلمة السر": "To edit: exit and log in with the password", "للتعليمة؟": "to the instruction?", "لم تحدد أي جهاز": "No device selected", "لم يتم": "Not yet", "لم يتم العثور على بيانات صحيحة في الملف": "No valid data found in the file", "لم يتم بعد": "Not yet", "لهذا الشهر": "for this month", "مارس": "March", "مايو": "May", "متأخر": "Late", "متبقي": "Remaining", "متصل ومتزامن": "Online & synced", "مثال": "Example", "مثال: أحمد عادل": "Example: Ahmed Adel", "مثال: شركة التقنية للمعايرة": "Example: Technology Calibration Co.", "محاولات غلط كتير — استنى شوية وجرب تاني": "Too many wrong attempts — wait a bit and try again", "مسؤول المعايرة": "Calibration officer", "مستحق": "Due", "مستحق الشهر": "Due this month", "مسح البيانات الحالية واستبدالها بملف جديد": "Clear current data and replace it with a new file", "مسح السجل": "Clear history", "مسح سجل الطباعة": "Clear print history", "مسح كل سجل المطبوعات؟": "Clear the whole print history?", "مشاركة": "Share", "معاينة": "Preview", "معطل": "Faulty", "معطلة": "Faulty", "مفيش أجهزة مكررة في أكتر من شهر": "No devices repeated in more than one month", "مفيش حاجة هتتحذف، والأسماء والأكواد والصور زي ما هي": "Nothing will be deleted; names, codes and photos stay as they are", "مكتمل": "Completed", "ملاحظات": "Notes", "ملحوظة": "Note", "ملخص السنة": "Year summary", "ملخص بتكلفة معايرة الأجهزة التي وصلت شهاداتها خلال العام (إجمالي": "Summary of calibration cost for devices whose certificates arrived during the year (total", "ملخص تكلفة المعايرة": "Calibration cost summary", "ملخص تكلفة المعايرة لسنة": "Calibration cost summary for year", "ملخص حسب النوع": "Summary by type", "من": "from", "من شهر": "From month", "موجود في": "exists in", "نرجو من سيادتكم إرسال باقي الشهادات الخاصة بالأجهزة التالية والتي تم تنفيذ معايرتها ولم تصل شهاداتها حتى الآن (إجمالي": "Kindly send the remaining certificates for the following devices, which were calibrated but whose certificates have not arrived yet (total", "نرجو من سيادتكم إرسال عرض سعر لمعايرة أجهزة شهر": "Kindly send a price quote for the calibration of the devices of month", "نسبة الخصم على إجمالي المبلغ المستحق": "Discount percentage on the total amount due", "نسخة": "Copy", "نسخة من": "Copy of", "نسخة من كل عرض سعر أو طلب شهادات أو تعليمة تم طباعتها أو تحميلها أو مشاركتها": "A copy of every price quote, certificate request or instruction that was printed, downloaded or shared", "نسخة منفّذة (تاريخ تنفيذ) هتتحذف": "executed copy (with execution date) will be deleted", "نظام إدارة المعايرة": "Calibration Management System", "نكمّل؟": "Continue?", "نهائياً؟": "permanently?", "نوع": "type", "نوع الجهاز (لحساب سعر المعايرة)": "Device type (to calculate calibration price)", "نوع جديد": "New type", "نوفمبر": "November", "هذا الإجراء لا يمكن التراجع عنه": "This action cannot be undone", "هذا الحقل مخصص للربط بقاعدة بيانات مشتركة مستقبلاً — اتركه فارغاً إذا كنت تستخدم التخزين المحلي فقط": "This field is reserved for connecting to a shared database in the future — leave it empty if you only use local storage", "هذه الأجهزة تم إزالتها من التعليمة الرئيسية": "These devices were removed from the main instruction", "هيتم إرجاع": "Will be restored:", "و": "and", "وتفضلوا بقبول فائق التقدير والاحترام،،،": "Yours faithfully,", "وضع العرض للمدير — قراءة فقط": "Manager view — read only", "وضع العرض للمدير — للقراءة فقط": "Manager view — read only", "وضع المدير — قراءة فقط": "Manager mode — read only", "يجب أن يحتوي الملف على 5 أعمدة بالترتيب: القسم — الجهاز — الموقع — الشهر (رقم 1-12) — الكود": "The file must contain 5 columns in this order: Section — Device — Location — Month (number 1-12) — Code", "يحتاج متابعة": "Needs follow-up", "يحتفظ النظام بسنة واحدة سابقة فقط": "The system keeps only one previous year", "يلغي كل الترحيلات ويرجّع كل جهاز لشهره الأصلي (من غير حذف أي بيانات)": "Cancels all transfers and puts every device back in its original month (nothing is deleted)", "يناير": "January", "يوليو": "July", "يونيو": "June", "إجمالي الأجهزة المنفذة": "Executed devices total", "الأجهزة": "Devices", "الأجهزة المنفذة": "Executed devices", "المعطلة": "Faulty", "هذا الجهاز": "this device", "تنفيذ": "Execute", "تعديل": "Edit", "إضافة نوع": "Add type", "الأنواع": "Types", "ضيف": "Add", "اخرج": "Exit", "سجل": "Record", "مصدر": "Source", "هدف": "Target", "عرض الكل": "Show all", "البحث واللغات": "Search & languages", "بإجمالي": "totaling", "قبل الخصم —": "before discount —", "Word ونائب رئيس القسم": "Word & deputy head", "نائب رئيس قسم الجودة": "Deputy Head of Quality Department", "اسم نائب رئيس قسم الجودة": "Deputy Head of Quality Department name", "الجودة": "Quality", "اللغة": "Language", "عرض أول": "Showing first"};
   const keys = Object.keys(EN).sort((a, b) => b.length - a.length);
   const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const L = '\u0621-\u064A\u066E-\u06D3';
